@@ -6,19 +6,22 @@ class FileAnalyzer(object):
     """Prepares data for SentimentAnalyzer"""
     def __init__(self,file_path=None):
         self.file_path = file_path
-
         self.textfile = None
 
+    def line_generator(self):
+        """Opens file and generates lines"""
+        with open(self.file_path, 'r') as f:
+            for line in f:
+                line = line.strip('\n')
+                yield line
 
-    def open(self):
-        pass
-
-    def parse_words(self):
+    def parse_words(self,file):
+        """Finds individual words from text"""
         pass
 
     def count_words(self,listofwords):
+        """Counts the number of words in text"""
         pass
-
 
 class DBLookup(object):
     """Connects the wordbank.db"""
@@ -26,8 +29,8 @@ class DBLookup(object):
         pass
 
     def query(self,word):
+        """Queries Database for word"""
         pass
-
 
 class SentimentAnalyzer(object):
     """Finds the sentiment value of objects"""
@@ -39,8 +42,9 @@ class SentimentAnalyzer(object):
         pass
 
 def main():
-    pass
-
+    testdoc = './text_sentiment/tests/fixtures/testfile.txt'
+    f = FileAnalyzer(file_path=testdoc)
+    result = f.line_generator()
 
 if __name__ == '__main__':
     main()
