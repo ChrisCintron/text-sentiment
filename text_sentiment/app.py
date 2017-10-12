@@ -126,15 +126,23 @@ class DBLookup(object):
             except sqlite3.OperationalError as e:
                 print(e)
 
-    def query(self,word):
+    #Two binary searches because of our index tables from create_index()
+    def wordsearch(self,word):
         """Queries Database for word"""
-        pass
+        try:
+            string = """SELECT value FROM 'Warriner-English' WHERE word='{}';""".format(word)
+            self.c.execute(string)
+            value = self.c.fetchone()
+            print(value)
+            return value
+        except:
+            print("Error: wordsearch failed")
 
     def main(self):
-
         self.loadin_tables()
         self.loadin_indices()
         self.create_index()
+        self.wordsearch('freezing')
         self.connection.close()
 
 class SentimentAnalyzer(object):
