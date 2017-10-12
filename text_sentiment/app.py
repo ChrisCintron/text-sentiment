@@ -9,6 +9,7 @@ TODO:
 class FileAnalyzer(object):
     """Prepares data for SentimentAnalyzer"""
     def __init__(self,file_path=None,chunk_size=1):
+        #Variables for methods
         self.file_path = file_path
         self.chunk_size = chunk_size
         self.textfile = None
@@ -92,12 +93,49 @@ class FileAnalyzer(object):
 
 class DBLookup(object):
     """Connects the wordbank.db"""
-    def __init__(self,path_to_local_db):
-        pass
+    def __init__(self,path_to_db=None):
+        #Initiate database connection
+        self.connection = sqlite3.connect(path_to_db)
+        self.c = self.connection.cursor() #Used for interacting with DB
+
+        #Variables for methods
+        self.tables = None
+        self.indices = None
+
+    def loadin_tables(self):
+        """Grab tables from DB, returns Tuple of tables"""
+        self.tables = self.c.execute("""SELECT name FROM sqlite_master WHERE type='table'""")
+        self.tables = tuple(table[0] for table in self.tables)
+        return self.tables
+
+    def loadin_indices(self):
+        """Grab indices from DB, returns Tuple of indices"""
+        self.indices = self.c.execute("""SELECT name FROM sqlite_master WHERE type='index'""")
+        self.indices = tuple(index[0] for index in self.indices)
+        return self.indices
+
+    #Optimization for doing our word searches
+    def create_index(self):
+        """Index connected to table for faster searches"""
+        for tablename in self.tables:
+            try:
+                index_name = '{}_idx'.format(tablename)
+                string = """CREATE INDEX '{}' ON '{}'({});""".format(index_name,tablename,'word')
+                self.c.execute(string)
+                self.connection.commit()
+            except sqlite3.OperationalError as e:
+                print(e)
 
     def query(self,word):
         """Queries Database for word"""
         pass
+
+    def main(self):
+
+        self.loadin_tables()
+        self.loadin_indices()
+        self.create_index()
+        self.connection.close()
 
 class SentimentAnalyzer(object):
     """Finds the sentiment value of objects"""
@@ -110,9 +148,13 @@ class SentimentAnalyzer(object):
 
 def main():
     print("Main Starting")
-    testdoc = './text_sentiment/tests/fixtures/testfile.txt'
-    f = FileAnalyzer(file_path=testdoc,chunk_size=2)
-    f.main()
+    #testdoc = './text_sentiment/tests/fixtures/testfile.txt'
+    db_path = './text_sentiment/models/wordbank.db'
+    #f = FileAnalyzer(file_path=testdoc,chunk_size=2)
+    #f.main()
+    db = DBLookup(db_path)
+    db.main()
+
 
 if __name__ == '__main__':
     main()
