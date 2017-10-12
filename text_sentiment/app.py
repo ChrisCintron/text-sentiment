@@ -14,11 +14,14 @@ Counters is the right way to add them.
 """
 class FileAnalyzer(object):
     """Prepares data for SentimentAnalyzer"""
-    def __init__(self,file_path=None):
+    def __init__(self,file_path=None,lines_at_a_time=1):
         self.file_path = file_path
+        self.lines_at_a_time = lines_at_a_time
         self.textfile = None
 
-        self.main()
+        #Generators
+        self.line_gen = self.line_generator()
+        self.chunks_gen = self.read_in_chunks()
 
     def line_generator(self):
         """Opens file and generates lines"""
@@ -26,6 +29,18 @@ class FileAnalyzer(object):
             for line in f:
                 line = line.strip('\n')
                 yield line
+
+    def read_in_chunks(self):
+        """Read file by specified number of lines"""
+        i,text_chunk = 0,str()
+        for line in self.line_gen:
+            i += 1
+            text_chunk += line
+            if i >= self.lines_at_a_time:
+                yield text_chunk
+                i,text_chunk = 0,str()
+        if text_chunk:
+            yield text_chunk
 
     def word_parsing_generator(self,line_gen):
         """Finds individual words from text
@@ -79,10 +94,11 @@ class FileAnalyzer(object):
         print(word_bulk)
 
     def main(self):
-        l = self.line_generator()
-        p = self.word_parsing_generator(l)
-        c = self.word_count_generator(p,lines_at_a_time=10)
-        t = self.tally_word_count(c)
+        self.line_gen = self.line_generator()
+        #p = self.word_parsing_generator(l)
+        #c = self.word_count_generator(p,lines_at_a_time=10)
+        #t = self.tally_word_count(c)
+        self.read_in_chunks()
 
 class DBLookup(object):
     """Connects the wordbank.db"""
@@ -103,8 +119,9 @@ class SentimentAnalyzer(object):
         pass
 
 def main():
+    print("Main Starting")
     testdoc = './text_sentiment/tests/fixtures/testfile.txt'
-    f = FileAnalyzer(file_path=testdoc)
+    f = FileAnalyzer(file_path=testdoc,lines_at_a_time=2)
 
 if __name__ == '__main__':
     main()
