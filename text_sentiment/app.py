@@ -14,35 +14,37 @@ Counters is the right way to add them.
 """
 class FileAnalyzer(object):
     """Prepares data for SentimentAnalyzer"""
-    def __init__(self,file_path=None,lines_at_a_time=1):
+    def __init__(self,file_path=None,chunk_size=1):
         self.file_path = file_path
-        self.lines_at_a_time = lines_at_a_time
+        self.chunk_size = chunk_size
         self.textfile = None
 
         #Generators
         self.line_gen = self.line_generator()
-        self.chunks_gen = self.read_in_chunks()
+        self.chunk_gen = self.read_in_chunks(self.line_gen,self.chunk_size)
+
+
 
     def line_generator(self):
         """Opens file and generates lines"""
-        with open(self.file_path, 'r') as f:
-            for line in f:
+        with open(self.file_path, 'r') as infile:
+            for line in infile:
                 line = line.strip('\n')
                 yield line
 
-    def read_in_chunks(self):
+    def read_in_chunks(self,line_gen=None,chunk_size=None):
         """Read file by specified number of lines"""
         i,text_chunk = 0,str()
-        for line in self.line_gen:
+        for line in line_gen:
             i += 1
             text_chunk += line
-            if i >= self.lines_at_a_time:
+            if i >= chunk_size:
                 yield text_chunk
                 i,text_chunk = 0,str()
         if text_chunk:
             yield text_chunk
 
-    def word_parsing_generator(self,line_gen):
+    def word_parsing_generator(self,chunk_gen=None):
         """Finds individual words from text
         Checks if all chars in word are alphabetical.
 
@@ -54,7 +56,7 @@ class FileAnalyzer(object):
         Possibly another way of doing it..
         #filtered_list = tuple(filter(str.isalpha,words))
         """
-        for line in line_gen:
+        for line in chunk_gen:
 
             line = line.lower()
             line = line.replace('.', '')
@@ -66,7 +68,7 @@ class FileAnalyzer(object):
 
             yield accepted_list
 
-    def word_count_generator(self,filtered_list,lines_at_a_time=1):
+    def word_count_generator(self,filtered_list=None,chunk_size=None):
         """Counts the number of words in text
         lines_at_a_time = Number of lines you want handled at one time
         Iterate through each line and yield the maximum lines specified
@@ -77,7 +79,7 @@ class FileAnalyzer(object):
         for line in filtered_list:
             i += 1
             bulk_words += line
-            if i >= lines_at_a_time:
+            if i >= chunk_size:
                 c = Counter(bulk_words)
                 yield c
                 bulk_words = ()
@@ -121,7 +123,7 @@ class SentimentAnalyzer(object):
 def main():
     print("Main Starting")
     testdoc = './text_sentiment/tests/fixtures/testfile.txt'
-    f = FileAnalyzer(file_path=testdoc,lines_at_a_time=2)
+    f = FileAnalyzer(file_path=testdoc,chunk_size=2)
 
 if __name__ == '__main__':
     main()
