@@ -21,7 +21,7 @@ def specific_func_needed():
 
 class TestFileAnalyzer(object):
     def test_general(self):
-        f = FileAnalyzer(file_path=TEST_DOC,chunk_size=2)
+        f = FileAnalyzer(file_path=TEST_DOC)
         line_gen = f._openfile()
         gen1 = f.makechunk(line_generator=line_gen,chunk_size=2)
         gen2 = f.clean(gen1)
