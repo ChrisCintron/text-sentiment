@@ -91,6 +91,7 @@ class DBLookup(object):
         """Grab indices from DB, returns Tuple of indices"""
         self.indices = self.c.execute("""SELECT name FROM sqlite_master WHERE type='index'""")
         self.indices = tuple(index[0] for index in self.indices)
+        #print(list(self.indices))
         return self.indices
 
     #Optimization for doing our word searches
@@ -100,13 +101,15 @@ class DBLookup(object):
             try:
                 index_name = '{}_idx'.format(tablename)
                 string = """CREATE INDEX '{}' ON '{}'({});""".format(index_name,tablename,'word')
+                #print(string)
                 self.c.execute(string)
                 self.connection.commit()
+                yield string
             except sqlite3.OperationalError as e:
-                print(e)
+                yield
 
     #Two binary searches because of our index tables from createindex()
-    def wordsearch(self,word):
+    def wordsearch(self,database,word):
         """Queries Database for word"""
         try:
             string = """SELECT value FROM 'Warriner-English' WHERE word='{}';""".format(word)
