@@ -64,7 +64,7 @@ class FileAnalyzer(object):
 
             #Alter, replace, and format chunk
             chunk = chunk.lower()
-            clean_chunk = list(map(lambda char: chunk.replace(char, ' '), bad_chars))
+            clean_chunk = [char for char in chunk if not char in bad_chars]
             clean_chunk = ''.join(clean_chunk)
 
             #Gets rid of double spaces and makes tuple
@@ -101,7 +101,7 @@ class DBLookup(object):
     def loadindices(self):
         """Grab indices from DB, returns Tuple of indices"""
         self.indices = self.c.execute("""SELECT name FROM sqlite_master WHERE type='index'""")
-        self.indices = tuple(index[0] for index in self.indices)
+        self.indices = tuple(index for index in self.indices)
         #print(list(self.indices))
         return self.indices
 

@@ -51,7 +51,7 @@ def test_createindex(db):
 
 def test_loadindices(db):
     #print("__loadindices__")
-    db.indices = ('Warriner-English_idx', 'labMTwords-English_idx')
+    db.indices = (('labMTwords-English_idx',), ('Warriner-English_idx',))
     assert db.indices == db.loadindices()
 
 @pytest.mark.skip
