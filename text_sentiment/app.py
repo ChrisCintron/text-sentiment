@@ -87,11 +87,16 @@ class DBLookup(object):
         self.tables = None
         self.indices = None
 
+        #Holds dict of dict of word:value
+        self.data_tables = None
+
+
     def loadtables(self):
         """Grab tables from DB, returns Tuple of tables"""
         self.tables = self.c.execute("""SELECT name FROM sqlite_master WHERE type='table'""")
         self.tables = tuple(table[0] for table in self.tables)
-        return self.tables
+        self.data_tables = {table: {} for table in self.tables}
+        return self.data_tables
 
     def loadindices(self):
         """Grab indices from DB, returns Tuple of indices"""
@@ -121,32 +126,18 @@ class DBLookup(object):
             string = """SELECT value FROM '{}' WHERE word='{}';""".format(table,word)
             self.c.execute(string)
             value = self.c.fetchone()
-            print(value)
             return value
         except:
-            print("Error: wordsearch failed")
+            print("Error: wordsearch fail: [{}]".format(word))
 
     def chunksearch(self,tables,chunk):
         """Takes in chunk and returns chunk containing dict of {word,value}"""
-        for table in tables:
-            wordvalue_chunk = {}
-            for word in chunk:
+        for word in chunk:
+            for table in tables:
                 value = self.wordsearch(table,word)
-                wordvalue_chunk.update({word:value})
-            yield wordvalue_chunk
+                self.data_tables[table].update({word:value})
+        return self.data_tables
 
-
-
-
-
-
-
-    def main(self):
-        self.loadtables()
-        self.loadindices()
-        self.createindex()
-        self.wordsearch('freezing')
-        self.connection.close()
 
 class SentimentAnalyzer(object):
     """Finds the sentiment value of objects"""
