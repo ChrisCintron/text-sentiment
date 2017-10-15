@@ -10,6 +10,12 @@ class FileAnalyzer(object):
         #Variables for methods
         self.file_path = file_path
 
+    def main():
+        line_generator = self._openfile()
+        dirty_chunks = self.makechunk(line_generator,self.chunk_size)
+        clean_chunks = self.clean(dirty_chunks)
+        counted_chunks = self.countwords(clean_chunks)
+
     def _openfile(self):
         """Opens file and generates lines
         Args:
@@ -19,8 +25,8 @@ class FileAnalyzer(object):
         """
         with open(self.file_path, 'r') as infile:
             for line in infile:
-                line = line.strip('\n')
-                yield line
+                line_generator = line.strip('\n')
+                yield line_generator
 
     def makechunk(self,line_generator,chunk_size):
         """Package lines in file into specific chunk size, return the chunk
@@ -33,13 +39,13 @@ class FileAnalyzer(object):
             while True:
                 for i in range(0,chunk_size):
                     lines.append(next(line_generator))
-                text_chunk = ' '.join(lines)
-                yield text_chunk
+                dirty_chunk = ' '.join(lines)
+                yield dirty_chunk
                 lines = []
         except StopIteration as e:
             if lines:
-                text_chunk = ''.join(lines)
-                yield text_chunk
+                dirty_chunk = ''.join(lines)
+                yield dirty_chunk
 
     def clean(self,chunk_generator):
         """Cleans chunk to only contain valid characters
@@ -109,16 +115,31 @@ class DBLookup(object):
                 yield
 
     #Two binary searches because of our index tables from createindex()
-    def wordsearch(self,database,word):
-        """Queries Database for word"""
+    def wordsearch(self,table,word):
+        """SINGLE word search of the value of word from db"""
         try:
-            string = """SELECT value FROM 'Warriner-English' WHERE word='{}';""".format(word)
+            string = """SELECT value FROM '{}' WHERE word='{}';""".format(table,word)
             self.c.execute(string)
             value = self.c.fetchone()
             print(value)
             return value
         except:
             print("Error: wordsearch failed")
+
+    def chunksearch(self,tables,chunk):
+        """Takes in chunk and returns chunk containing dict of {word,value}"""
+        for table in tables:
+            wordvalue_chunk = {}
+            for word in chunk:
+                value = self.wordsearch(table,word)
+                wordvalue_chunk.update({word:value})
+            yield wordvalue_chunk
+
+
+
+
+
+
 
     def main(self):
         self.loadtables()
