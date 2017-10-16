@@ -3,84 +3,101 @@ from text_sentiment.tests.fixtures.constants import *
 import pytest
 import copy
 
-
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def f():
-    f = FileAnalyzer(file_path=TEST_DOC)
+    print("SetupClass:          FileFilter")
+    f = FileFilter(file_path=TEST_DOC,chunk_size=3)
     yield f
+    print("TeardownClass:          FileFilter")
 
-@pytest.fixture(scope="module")
-def db():
+@pytest.fixture()
+def fprint(f):
+    print("\n.FF: Setup Method")
+    yield #Initiate Method
+
+    print("Pipeline:                    ",f.pipeline)
+    if f.pipeline:
+        print("    \n___Pipeline Content[Start]___")
+        for content in f.pipeline:
+            print("    [Content]")
+            print("    ",content,"\n")
+        print("    ___Pipeline Content[Finish]___")
+    print("FF: Teardown Method")
+
+@pytest.fixture(scope="session")
+def db(f):
+    print("SetupClass:          DBLookup")
+    print("Check__init__:       ",)
+    f.addfilter(f.openfile)
+    f.addfilter(f.makechunk)
+    f.addfilter(f.clean)
+    f.process()
+
     db = DBLookup(path_to_db=DB_PATH)
     yield db
+    print("TeardownClass:          DBLookup")
 
-def test_openfile(f):
-    line_generator = f._openfile()
-    output = list(line_generator)
-    assert len(output)
-    assert output[0] == 'This is line one.'
+@pytest.fixture()
+def dbprint(db,f):
+    print("\n.DB: Setup Method")
+    yield #Initiate Method
+    print("DB: Teardown Method")
 
-def test_makechunk(f):
-    f.chunk_size = 3
-    line_generator = f._openfile()
-    dirty_chunks = f.makechunk(line_generator,f.chunk_size)
-    output = list(dirty_chunks)
-    assert len(output)
-    assert output[0] == 'This is line one. My second line. Third line is the charm.'
+class TestFileFilter:
+    def test_openfile(self,f,fprint):
+        print("_openfile()")
+        f.addfilter(f.openfile)
+        f.process()
 
-def test_clean(f):
-    line_generator = f._openfile()
-    dirty_chunks = f.makechunk(line_generator,f.chunk_size)
-    clean_chunk = f.clean(dirty_chunks)
-    assert clean_chunk
+    def test_makechunk(self,f,fprint):
+        print("_makechunk()")
+        f.addfilter(f.openfile)
+        f.addfilter(f.makechunk)
+        f.process()
+        assert next(f.pipeline) == 'This- is line one. My second line. Third line is the charm.'
 
-def test_loadtables(db):
-    expectedresults = {('Warriner-English'): {},('labMTwords-English'):{}}
-    db.tables = db.loadtables()
-    assert db.tables == expectedresults
+    def test_clean(self,f,fprint):
+        print("clean()")
+        f.addfilter(f.openfile)
+        f.addfilter(f.makechunk)
+        f.addfilter(f.clean)
+        f.process()
+        assert next(f.pipeline)[0] == 'this'
 
-def test_createindex(db):
-    string = ["CREATE INDEX 'Warriner-English_idx' ON 'Warriner-English'(word);",
-              "CREATE INDEX 'labMTwords-English_idx' ON 'labMTwords-English'(word);"]
-    try:
-        assert string == list(db.createindex())
-        print("Index Created")
-    except:
-        print("Indices Present")
-        assert [None,None] == list(db.createindex())
+class TestDBLookup:
+    def test_loadtables(self,db,dbprint):
+        expectedresults = {('Warriner-English'): {},('labMTwords-English'):{}}
+        db.tables = db.loadtables()
+        assert db.tables == expectedresults
 
-def test_loadindices(db):
-    #print("__loadindices__")
-    db.indices = (('labMTwords-English_idx',), ('Warriner-English_idx',))
-    assert db.indices == db.loadindices()
+    def test_loadindices(self,db,dbprint):
+        #print("__loadindices__")
+        db.indices = (('labMTwords-English_idx',), ('Warriner-English_idx',))
+        assert db.indices == db.loadindices()
 
-@pytest.mark.skip
-def test_wordsearch(db):
-    dbs = ('Warriner-English_idx', 'labMTwords-English_idx')
-    #db.wordsearch()
+    def test_createindex(self,db,dbprint):
+        string = ["CREATE INDEX 'Warriner-English_idx' ON 'Warriner-English'(word);",
+                  "CREATE INDEX 'labMTwords-English_idx' ON 'labMTwords-English'(word);"]
+        try:
+            assert string == list(db.createindex())
+            print("Index Created")
+        except:
+            print("Indices Present")
+            assert [None,None] == list(db.createindex())
 
-def test_chunksearch(db,f):
-    line_generator = f._openfile()
-    dirty_chunks = f.makechunk(line_generator,f.chunk_size)
-    clean_chunks = f.clean(dirty_chunks)
-    print("================================================")
-    print('table:           ',db.tables)
-    for chunk in clean_chunks:
-        print('\nchunk:           ',chunk)
-        data_tables = db.chunksearch(db.tables,chunk)
-        print('wordvalues:        ')
-        for table in data_tables:
-            print("                 ",table)
-            print("                 ",data_tables[table],'\n')
+    def test_wordsearch(self,db,dbprint):
+        dbs = ('Warriner-English_idx', 'labMTwords-English_idx')
 
-    print("================================================")
+    def test_chunksearch(self,f,db,dbprint):
+        print("================================================")
+        print('table:           ',db.tables)
 
+        for chunk in f.pipeline:
+            print('\nchunk:           ',chunk)
+            data_tables = db.chunksearch(db.tables,chunk)
+            print('wordvalues:        ')
+            for table in data_tables:
+                print("                 ",table)
+                print("                 ",data_tables[table],'\n')
 
-
-@pytest.mark.skip
-def test_db_main(db):
-    db.loadtables()
-    db.loadindices()
-    db.createindex()
-    print(self.chunksearch(self.tables,self.chunk))
-    self.connection.close()
+        print("================================================")
