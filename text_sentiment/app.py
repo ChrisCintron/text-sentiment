@@ -156,17 +156,6 @@ class DBLookup(object):
                 except TypeError:
                     print("Word: ",word,"| Frequency: ",frequency)
 
-
-    """
-    def bulksearch(self,tables,chunk):
-        Takes in chunk and returns chunk containing dict of {word,value}
-        for word in chunk:
-            for table in tables:
-                value = self.wordsearch(table,word)
-                self.data_tables[table].update({word:value})
-        return self.data_tables """
-
-
 class SentimentAnalyzer(object):
     """Finds the sentiment value of objects"""
     def __init__(self):
