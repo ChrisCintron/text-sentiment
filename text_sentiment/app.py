@@ -11,6 +11,7 @@ class FileFilter(object):
         self.chunk_size = chunk_size
         self.filters = []
         self.pipeline = None
+        self.wordcounts = Counter()
 
     def addfilter(self,filter_method):
         """Add filter to be used when pipelining data"""
@@ -26,7 +27,7 @@ class FileFilter(object):
         """
         with open(self.file_path, 'r') as infile:
             for line in infile:
-                line_generator = line.strip('\n')
+                line_generator = line.rstrip('\n')
                 yield line_generator
 
     def makechunk(self,line_generator):
@@ -45,7 +46,7 @@ class FileFilter(object):
                 lines = []
         except StopIteration as e:
             if lines:
-                dirty_chunk = ''.join(lines)
+                dirty_chunk = ' '.join(lines)
                 yield dirty_chunk
 
 
@@ -73,6 +74,10 @@ class FileFilter(object):
             clean_chunk = tuple(clean_chunk.split())
             yield clean_chunk
 
+    def countwords(self,chunk_generator):
+        for chunk in chunk_generator:
+            counted_chunk = Counter(chunk)
+            self.wordcounts.update(counted_chunk)
 
     def process(self):
         """Feeds pipeline data back into the next filter method in filters
@@ -83,20 +88,22 @@ class FileFilter(object):
         for f in self.filters:
             self.pipeline = f(self.pipeline)
 
-    def test_pipeline(self,f):
-        print("PIPELINE:                  >>>>>>>>>>")
-
 class DBLookup(object):
     """Connects the wordbank.db"""
-    def __init__(self,path_to_db=None):
+    def __init__(self,path_to_db=None,wordbank=None):
         #Initiate database connection
         self.connection = sqlite3.connect(path_to_db)
         self.c = self.connection.cursor() #Used for interacting with DB
         #Variables for methods
         self.tables = None
         self.indices = None
+
+        #Wordbank used for looking through dicts
+        self.wordbank = wordbank
+
         #Holds dict of dict of word:value
         self.data_tables = None
+
 
 
     def loadtables(self):
@@ -138,13 +145,26 @@ class DBLookup(object):
         except:
             print("Error: wordsearch fail: [{}]".format(word))
 
-    def chunksearch(self,tables,chunk):
-        """Takes in chunk and returns chunk containing dict of {word,value}"""
+    def loaddata(self):
+        for table in self.tables:
+            for word in self.wordcounts:
+                frequency = self.wordbank[word]
+                try:
+                    value = self.wordsearch(table,word)[0]
+                    self.data_tables[table].update({word:value*frequency})
+                    print("Word: ",word,"| Frequency: ",frequency)
+                except TypeError:
+                    print("Word: ",word,"| Frequency: ",frequency)
+
+
+    """
+    def bulksearch(self,tables,chunk):
+        Takes in chunk and returns chunk containing dict of {word,value}
         for word in chunk:
             for table in tables:
                 value = self.wordsearch(table,word)
                 self.data_tables[table].update({word:value})
-        return self.data_tables
+        return self.data_tables """
 
 
 class SentimentAnalyzer(object):
