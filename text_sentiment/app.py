@@ -1,22 +1,61 @@
-import sqlite3
-import os
-import sys
+
+from tests.fixtures.constants import *
+from sqlalchemy import Integer, Column, Numeric, String
+from sqlalchemy import create_engine, MetaData, Table
+from sqlalchemy.orm import mapper, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
-from .tests.fixtures.constants import *
 
-class FileFilter(object):
-    """Prepares data for SentimentAnalyzer"""
-    def __init__(self,file_path=None,chunk_size=1):
-        self.file_path = file_path
-        self.chunk_size = chunk_size
+
+class Filters(object):
+    def __init__(self):
         self.filters = []
-        self.pipeline = None
-        self.wordcounts = Counter()
 
-    def addfilter(self,filter_method):
-        """Add filter to be used when pipelining data"""
-        if callable(filter_method):
-            self.filters.append(filter_method)
+    def addfilter(self,method):
+        if callable(method):
+            self.filters.append(method)
+
+    def split(self,chunks):
+        for chunk in chunks:
+            chunk = chunk.split(' ')
+            yield chunk
+
+    def badchars(self,chunks):
+        from itertools import groupby
+        for chunk in chunks:
+            chunk = [''.join(filter(str.isalpha,word)) for word in chunk]
+            yield chunk
+
+    def lowercase(self,chunks):
+        for chunk in chunks:
+            chunk = chunk.lower()
+            yield chunk
+
+    def whitespace(self,chunks):
+        for chunk in chunks:
+            w = ' '
+            n = ''
+            while w in chunk:
+                chunk.remove(w)
+
+            while n in chunk:
+                chunk.remove(n)
+
+            yield chunk
+
+    def process(self,pipeline):
+        for f in self.filters:
+            pipeline = f(pipeline)
+        return pipeline
+
+class FileObj(object):
+    """Read in file"""
+    def __init__(self,file_path):
+        self.file_path = file_path
+        self.pipeline = file_path
+
+        self.chunk_size = 3
+        self.process_methods = []
 
     def openfile(self,*kwargs):
         """Opens file and generates lines
@@ -30,7 +69,7 @@ class FileFilter(object):
                 line_generator = line.rstrip('\n')
                 yield line_generator
 
-    def makechunk(self,line_generator):
+    def chunk(self,line_generator):
         """Package lines in file into specific chunk size, return the chunk
         Args:
             line_gen = String Generator of lines of file
@@ -49,128 +88,93 @@ class FileFilter(object):
                 dirty_chunk = ' '.join(lines)
                 yield dirty_chunk
 
-
-    def clean(self,chunk_generator):
-        """Cleans chunk to only contain valid characters
-        Notes:
-            Possible for valid words in parsed words that
-            were not intended by original author.
-            Example:
-                word = self2*fish
-                returns: 'self', 'fish'
-        """
-        for chunk in chunk_generator:
-            #Find bad characters
-            bad_chars = filter(lambda char: not char.isalpha(),chunk)
-            bad_chars = set(bad_chars) #Removes duplicate bad characters
-            bad_chars.discard(' ')
-
-            #Alter, replace, and format chunk
-            chunk = chunk.lower()
-            clean_chunk = [char for char in chunk if not char in bad_chars]
-            clean_chunk = ''.join(clean_chunk)
-
-            #Gets rid of double spaces and makes tuple
-            clean_chunk = tuple(clean_chunk.split())
-            yield clean_chunk
-
-    def countwords(self,chunk_generator):
-        for chunk in chunk_generator:
-            counted_chunk = Counter(chunk)
-            self.wordcounts.update(counted_chunk)
+    def addprocessmethod(self,method):
+        if callable(method):
+            self.process_methods.append(method)
 
     def process(self):
-        """Feeds pipeline data back into the next filter method in filters
-        This pipeline strategy is useful for refeeding data back into the next filter
-        Credit goes to Brett at https://brett.is/writing/about/generator-pipelines-in-python/
-        """
-        self.pipeline = self.file_path
-        for f in self.filters:
+        for f in self.process_methods:
             self.pipeline = f(self.pipeline)
+        return self.pipeline
 
-class DBLookup(object):
-    """Connects the wordbank.db"""
-    def __init__(self,path_to_db=None,wordbank=None):
-        #Initiate database connection
-        self.connection = sqlite3.connect(path_to_db)
-        self.c = self.connection.cursor() #Used for interacting with DB
-        #Variables for methods
-        self.tables = None
-        self.indices = None
-
-        #Wordbank used for looking through dicts
-        self.wordbank = wordbank
-
-        #Holds dict of dict of word:value
-        self.data_tables = None
-
-
-
-    def loadtables(self):
-        """Grab tables from DB, returns Tuple of tables"""
-        self.tables = self.c.execute("""SELECT name FROM sqlite_master WHERE type='table'""")
-        self.tables = tuple(table[0] for table in self.tables)
-        self.data_tables = {table: {} for table in self.tables}
-        return self.data_tables
-
-    def loadindices(self):
-        """Grab indices from DB, returns Tuple of indices"""
-        self.indices = self.c.execute("""SELECT name FROM sqlite_master WHERE type='index'""")
-        self.indices = tuple(index for index in self.indices)
-        #print(list(self.indices))
-        return self.indices
-
-    #Optimization for doing our word searches
-    def createindex(self):
-        """Index connected to table for faster searches"""
-        for tablename in self.tables:
-            try:
-                index_name = '{}_idx'.format(tablename)
-                string = """CREATE INDEX '{}' ON '{}'({});""".format(index_name,tablename,'word')
-                #print(string)
-                self.c.execute(string)
-                self.connection.commit()
-                yield string
-            except sqlite3.OperationalError as e:
-                yield
-
-    #Two binary searches because of our index tables from createindex()
-    def wordsearch(self,table,word):
-        """SINGLE word search of the value of word from db"""
-        try:
-            string = """SELECT value FROM '{}' WHERE word='{}';""".format(table,word)
-            self.c.execute(string)
-            value = self.c.fetchone()
-            return value
-        except:
-            print("Error: wordsearch fail: [{}]".format(word))
-
-    def loaddata(self):
-        for table in self.tables:
-            for word in self.wordcounts:
-                frequency = self.wordbank[word]
-                try:
-                    value = self.wordsearch(table,word)[0]
-                    self.data_tables[table].update({word:value*frequency})
-                    print("Word: ",word,"| Frequency: ",frequency)
-                except TypeError:
-                    print("Word: ",word,"| Frequency: ",frequency)
-
-class SentimentAnalyzer(object):
-    """Finds the sentiment value of objects"""
+class Data(object):
     def __init__(self):
-        pass
+        self.counted_words = Counter()
+    def wordcount(self):
+        for chunk in self.content:
+            self.counted_words.update(Counter(chunk))
 
-    def totalvalue(self):
-        """Multiply count by the db's word value"""
-        pass
+Base = declarative_base()
+class WordBank(Base):
+    __tablename__ = 'Warriner-English'
+    word = Column(String, primary_key=True)
+    value = Column(Integer)
 
-    def countwords(self):
-        pass
-    #    """Counts number of words in text, return word counts"""
-    #    for chunk in chunk_generator:
-    #        yield Counter(chunk)
+class Database(object):
+    def __init__(self,db_path=None):
+        engine = create_engine('sqlite:///%s' % db_path, echo=False)
+        metadata = MetaData(engine)
+        Warriner_English = Table('Warriner-English', metadata, autoload=True)
+        Session = sessionmaker(bind=engine)
+        self.session = Session()
 
+    def query(self,word):
+        row = self.session.query(WordBank).filter_by(word=word).first()
+        return row
 
-if __name__ == '__main__':
-    pass
+class App(object):
+    def __init__(self):
+        self.c = FileObj(file_path=TEST_DOC)
+        self.db = Database(db_path=DB_PATH)
+        self.f = Filters()
+        self.data = Data()
+
+    def setup_FileObj(self):
+        self.c.addprocessmethod(self.c.openfile)
+        self.c.addprocessmethod(self.c.chunk)
+
+    def setup_Filters(self):
+        self.f.addfilter(self.f.lowercase)
+        self.f.addfilter(self.f.split)
+        self.f.addfilter(self.f.badchars)
+        self.f.addfilter(self.f.whitespace)
+
+    def setup(self):
+        self.setup_FileObj()
+        self.setup_Filters()
+
+    def run(self):
+        chunks = self.c.process()
+        self.data.content = self.f.process(chunks)
+
+def main():
+    app = App()
+    app.setup()
+    app.run()
+    app.data.wordcount()
+
+    totalcount = 0
+    totalvalue = 0
+
+    word = "hair"
+    frequency = app.data.counted_words[word]
+    totalcount += frequency
+    print("Word: ",word)
+    print("Frequency: ",frequency)
+    dbvalue = app.db.query(word).value
+    totalvalue += dbvalue * frequency
+    print("DBValue: ",dbvalue)
+
+    word = "line"
+    frequency = app.data.counted_words[word]
+    totalcount += frequency
+    print("Word: ",word)
+    print("Frequency: ",frequency)
+    dbvalue = app.db.query(word).value
+    totalvalue += dbvalue * frequency
+    print("DBValue: ",dbvalue)
+
+    totalsv = totalvalue/totalcount
+    print("Total Sentiment Value: ",totalsv)
+
+main()
