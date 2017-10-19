@@ -99,10 +99,38 @@ class FileObj(object):
 
 class Data(object):
     def __init__(self):
+        #Object with word and word values
+        self.content = None
         self.counted_words = Counter()
-    def wordcount(self):
+        self.dbvalues = {}
+
+    def countwords(self):
         for chunk in self.content:
             self.counted_words.update(Counter(chunk))
+
+    def updatedbvalues(self,dbvalues):
+        for value in dbvalues:
+            self.dbvalues.update(value)
+
+    def rejectwords(self):
+        self.rejectedwords = {key for key,value in self.dbvalues.items() if not value}
+
+    def cleanvalues(self):
+        for word in self.rejectedwords:
+            self.dbvalues.pop(word,None)
+            self.counted_words.pop(word,None)
+
+        self.dbvalues = Counter(self.dbvalues)
+        return self.dbvalues
+
+    def sentimentvalue(self):
+        totalvalue = 0
+        frequency = sum(self.counted_words.values())
+        for key,value in self.counted_words.items():
+            totalvalue += value * self.dbvalues[key]
+
+        sv = totalvalue/ frequency
+        return round(sv,4)
 
 Base = declarative_base()
 class WordBank(Base):
@@ -121,6 +149,14 @@ class Database(object):
     def query(self,word):
         row = self.session.query(WordBank).filter_by(word=word).first()
         return row
+
+    def queryall(self,dictobj):
+        for word in dictobj:
+            row = self.session.query(WordBank).filter_by(word=word).first()
+            if row:
+                yield {row.word:row.value}
+            elif not row:
+                yield {word:None}
 
 class App(object):
     def __init__(self):
@@ -147,34 +183,19 @@ class App(object):
         chunks = self.c.process()
         self.data.content = self.f.process(chunks)
 
+
 def main():
     app = App()
     app.setup()
     app.run()
-    app.data.wordcount()
 
-    totalcount = 0
-    totalvalue = 0
+    app.data.countwords()
+    data = app.data.counted_words
+    dbvalues = app.db.queryall(data)
+    app.data.updatedbvalues(dbvalues)
 
-    word = "hair"
-    frequency = app.data.counted_words[word]
-    totalcount += frequency
-    print("Word: ",word)
-    print("Frequency: ",frequency)
-    dbvalue = app.db.query(word).value
-    totalvalue += dbvalue * frequency
-    print("DBValue: ",dbvalue)
-
-    word = "line"
-    frequency = app.data.counted_words[word]
-    totalcount += frequency
-    print("Word: ",word)
-    print("Frequency: ",frequency)
-    dbvalue = app.db.query(word).value
-    totalvalue += dbvalue * frequency
-    print("DBValue: ",dbvalue)
-
-    totalsv = totalvalue/totalcount
-    print("Total Sentiment Value: ",totalsv)
-
+    app.data.rejectwords()
+    app.data.cleanvalues()
+    sv = app.data.sentimentvalue()
+    print(sv)
 main()
