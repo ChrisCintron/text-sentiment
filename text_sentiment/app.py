@@ -197,5 +197,7 @@ def main():
     app.data.rejectwords()
     app.data.cleanvalues()
     sv = app.data.sentimentvalue()
-    print(sv)
+    print("Sentiment Value: ",
+
+    sv)
 main()
