@@ -7,25 +7,31 @@ from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
 
 class Filters(object):
+    """Contains filters used to filter the contents from textfile"""
     def __init__(self):
         self.order = ['lowercase','split','badchars','whitespace']
 
     def filter(self,chunk):
+        """Filters chunk in specified order of filter layers"""
         for name in self.order:
             func = getattr(self,name)
             chunk = func(chunk)
         return chunk
 
     def split(self,chunk):
+        """Parses chunk into list"""
         return chunk.split(' ')
 
     def badchars(self,chunk):
+        """Removes non-alphabetical characters"""
         return [''.join(filter(str.isalpha,word)) for word in chunk]
 
     def lowercase(self,chunk):
+        """Lowercase all characters"""
         return chunk.lower()
 
     def whitespace(self,chunk):
+        """Removes whitespace and blanks"""
         space,nothing = ' ',''
         while space in chunk:
             chunk.remove(space)
