@@ -6,7 +6,6 @@ from sqlalchemy.orm import mapper, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
 
-
 class Filters():
     def __init__(self):
         self.order = ['lowercase','split','badchars','whitespace']
@@ -33,7 +32,6 @@ class Filters():
         while nothing in chunk:
             chunk.remove(nothing)
         return chunk
-
 
 class FileObj(object):
     """Read in file"""
@@ -78,7 +76,6 @@ class FileObj(object):
     def filter(self):
         for chunk in self.pipeline:
             yield self.filters.filter(chunk)
-
 
 class Data(object):
     def __init__(self):
@@ -143,22 +140,25 @@ class Database(object):
 
 class TextSentiment(object):
     def __init__(self):
-        self.content = FileObj(file_path=TEST_DOC,chunk_size=3).filter()
-        self.db = Database(db_path=DB_PATH)
         self.data = Data()
 
-        self.data.content = self.content
+        #Store content generator inside of data
+        self.data.content = FileObj(file_path=TEST_DOC,chunk_size=3).filter()
+        self.db = Database(db_path=DB_PATH)
 
-    def run(self):
-        pass
+    def countwords(self):
+        try:
+            self.data.countwords()
+        except Exception as e:
+            print("Error: ",e)
+        finally:
+            return self.data.counted_words
 
 def main():
     ts = TextSentiment()
-    ts.data.countwords()
-    data = ts.data.counted_words
+    data = ts.countwords()
     dbvalues = ts.db.queryall(data)
     ts.data.updatedbvalues(dbvalues)
-
     ts.data.rejectwords()
     ts.data.cleanvalues()
     sv = ts.data.sentimentvalue()
