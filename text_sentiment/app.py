@@ -6,7 +6,7 @@ from sqlalchemy.orm import mapper, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
 
-class Filters():
+class Filters(object):
     def __init__(self):
         self.order = ['lowercase','split','badchars','whitespace']
 
@@ -38,7 +38,6 @@ class FileObj(object):
     def __init__(self,file_path,chunk_size=1):
         self.file_path = file_path
         self.chunk_size = chunk_size
-        self.process_methods = []
         self.pipeline = self.chunk(self.openfile())
         self.filters = Filters()
 
@@ -78,9 +77,9 @@ class FileObj(object):
             yield self.filters.filter(chunk)
 
 class Data(object):
-    def __init__(self):
+    def __init__(self,content=None):
         #Object with word and word values
-        self.content = None
+        self.content = content
         self.counted_words = Counter()
         self.dbvalues = {}
 
@@ -139,12 +138,14 @@ class Database(object):
                 yield {word:None}
 
 class TextSentiment(object):
-    def __init__(self):
-        self.data = Data()
-
-        #Store content generator inside of data
-        self.data.content = FileObj(file_path=TEST_DOC,chunk_size=3).filter()
+    def __init__(self,file_path=None,chunk_size=3):
+        #Create content genenerator
+        self.content = FileObj(file_path=file_path,
+                               chunk_size=chunk_size).filter()
+        #Create database connection
         self.db = Database(db_path=DB_PATH)
+        #Create Data Object that holds working information
+        self.data = Data(content=self.content)
 
     def countwords(self):
         try:
@@ -154,14 +155,32 @@ class TextSentiment(object):
         finally:
             return self.data.counted_words
 
+    def query(self,word):
+        return self.db.query(word)
+
+    def queryall(self,dictobj):
+        return self.db.queryall(dictobj)
+
+    def updatedbvalues(self,values):
+        return self.data.updatedbvalues(values)
+
+    def rejectwords(self):
+        return self.data.rejectwords()
+
+    def cleanvalues(self):
+        return self.data.cleanvalues()
+
+    def sentimentvalue(self):
+        return self.data.sentimentvalue()
+
 def main():
-    ts = TextSentiment()
+    ts = TextSentiment(file_path=TEST_DOC,chunk_size=10)
     data = ts.countwords()
-    dbvalues = ts.db.queryall(data)
-    ts.data.updatedbvalues(dbvalues)
-    ts.data.rejectwords()
-    ts.data.cleanvalues()
-    sv = ts.data.sentimentvalue()
+    dbvalues = ts.queryall(data)
+    ts.updatedbvalues(dbvalues)
+    ts.rejectwords()
+    ts.cleanvalues()
+    sv = ts.sentimentvalue()
     print("Sentiment Value: ",sv)
 
 if __name__ == '__main__':
