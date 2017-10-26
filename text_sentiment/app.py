@@ -7,55 +7,42 @@ from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
 
 
-class Filters(object):
+class Filters():
     def __init__(self):
-        self.filters = []
+        self.order = ['lowercase','split','badchars','whitespace']
 
-    def addfilter(self,method):
-        if callable(method):
-            self.filters.append(method)
+    def filter(self,chunk):
+        for name in self.order:
+            func = getattr(self,name)
+            chunk = func(chunk)
+        return chunk
 
-    def split(self,chunks):
-        for chunk in chunks:
-            chunk = chunk.split(' ')
-            yield chunk
+    def split(self,chunk):
+        return chunk.split(' ')
 
-    def badchars(self,chunks):
-        from itertools import groupby
-        for chunk in chunks:
-            chunk = [''.join(filter(str.isalpha,word)) for word in chunk]
-            yield chunk
+    def badchars(self,chunk):
+        return [''.join(filter(str.isalpha,word)) for word in chunk]
 
-    def lowercase(self,chunks):
-        for chunk in chunks:
-            chunk = chunk.lower()
-            yield chunk
+    def lowercase(self,chunk):
+        return chunk.lower()
 
-    def whitespace(self,chunks):
-        for chunk in chunks:
-            w = ' '
-            n = ''
-            while w in chunk:
-                chunk.remove(w)
+    def whitespace(self,chunk):
+        space,nothing = ' ',''
+        while space in chunk:
+            chunk.remove(space)
+        while nothing in chunk:
+            chunk.remove(nothing)
+        return chunk
 
-            while n in chunk:
-                chunk.remove(n)
-
-            yield chunk
-
-    def process(self,pipeline):
-        for f in self.filters:
-            pipeline = f(pipeline)
-        return pipeline
 
 class FileObj(object):
     """Read in file"""
-    def __init__(self,file_path):
+    def __init__(self,file_path,chunk_size=1):
         self.file_path = file_path
-        self.pipeline = file_path
-
-        self.chunk_size = 3
+        self.chunk_size = chunk_size
         self.process_methods = []
+        self.pipeline = self.chunk(self.openfile())
+        self.filters = Filters()
 
     def openfile(self,*kwargs):
         """Opens file and generates lines
@@ -88,14 +75,10 @@ class FileObj(object):
                 dirty_chunk = ' '.join(lines)
                 yield dirty_chunk
 
-    def addprocessmethod(self,method):
-        if callable(method):
-            self.process_methods.append(method)
+    def filter(self):
+        for chunk in self.pipeline:
+            yield self.filters.filter(chunk)
 
-    def process(self):
-        for f in self.process_methods:
-            self.pipeline = f(self.pipeline)
-        return self.pipeline
 
 class Data(object):
     def __init__(self):
@@ -158,46 +141,28 @@ class Database(object):
             elif not row:
                 yield {word:None}
 
-class App(object):
+class TextSentiment(object):
     def __init__(self):
-        self.c = FileObj(file_path=TEST_DOC)
+        self.content = FileObj(file_path=TEST_DOC,chunk_size=3).filter()
         self.db = Database(db_path=DB_PATH)
-        self.f = Filters()
         self.data = Data()
 
-    def setup_FileObj(self):
-        self.c.addprocessmethod(self.c.openfile)
-        self.c.addprocessmethod(self.c.chunk)
-
-    def setup_Filters(self):
-        self.f.addfilter(self.f.lowercase)
-        self.f.addfilter(self.f.split)
-        self.f.addfilter(self.f.badchars)
-        self.f.addfilter(self.f.whitespace)
-
-    def setup(self):
-        self.setup_FileObj()
-        self.setup_Filters()
+        self.data.content = self.content
 
     def run(self):
-        chunks = self.c.process()
-        self.data.content = self.f.process(chunks)
-
+        pass
 
 def main():
-    app = App()
-    app.setup()
-    app.run()
+    ts = TextSentiment()
+    ts.data.countwords()
+    data = ts.data.counted_words
+    dbvalues = ts.db.queryall(data)
+    ts.data.updatedbvalues(dbvalues)
 
-    app.data.countwords()
-    data = app.data.counted_words
-    dbvalues = app.db.queryall(data)
-    app.data.updatedbvalues(dbvalues)
+    ts.data.rejectwords()
+    ts.data.cleanvalues()
+    sv = ts.data.sentimentvalue()
+    print("Sentiment Value: ",sv)
 
-    app.data.rejectwords()
-    app.data.cleanvalues()
-    sv = app.data.sentimentvalue()
-    print("Sentiment Value: ",
-
-    sv)
-main()
+if __name__ == '__main__':
+    main()
