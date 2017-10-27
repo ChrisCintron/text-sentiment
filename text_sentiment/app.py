@@ -7,23 +7,23 @@ from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
 
 class Filters(object):
-    """Contains filters used to filter the contents from textfile"""
+    """Contain filters used to filter the contents from textfile"""
     def __init__(self):
         self.order = ['lowercase','split','badchars','whitespace']
 
     def filter(self,chunk):
-        """Filters chunk in specified order of filter layers"""
+        """Filter chunk in specified order of filter layers"""
         for name in self.order:
             func = getattr(self,name)
             chunk = func(chunk)
         return chunk
 
     def split(self,chunk):
-        """Parses chunk into list"""
+        """Parse chunk into list"""
         return chunk.split(' ')
 
     def badchars(self,chunk):
-        """Removes non-alphabetical characters"""
+        """Remove non-alphabetical characters"""
         return [''.join(filter(str.isalpha,word)) for word in chunk]
 
     def lowercase(self,chunk):
@@ -31,7 +31,7 @@ class Filters(object):
         return chunk.lower()
 
     def whitespace(self,chunk):
-        """Removes whitespace and blanks"""
+        """Remove whitespace and blanks"""
         space,nothing = ' ',''
         while space in chunk:
             chunk.remove(space)
@@ -40,7 +40,7 @@ class Filters(object):
         return chunk
 
 class FileObj(object):
-    """Read in file"""
+    """Read in textfile and create content generator"""
     def __init__(self,file_path,chunk_size=1):
         self.file_path = file_path
         self.chunk_size = chunk_size
@@ -79,43 +79,9 @@ class FileObj(object):
                 yield dirty_chunk
 
     def filter(self):
+        """Filter content in textfile"""
         for chunk in self.pipeline:
             yield self.filters.filter(chunk)
-
-class Data(object):
-    def __init__(self,content=None):
-        #Object with word and word values
-        self.content = content
-        self.counted_words = Counter()
-        self.dbvalues = {}
-
-    def countwords(self):
-        for chunk in self.content:
-            self.counted_words.update(Counter(chunk))
-
-    def updatedbvalues(self,dbvalues):
-        for value in dbvalues:
-            self.dbvalues.update(value)
-
-    def rejectwords(self):
-        self.rejectedwords = {key for key,value in self.dbvalues.items() if not value}
-
-    def cleanvalues(self):
-        for word in self.rejectedwords:
-            self.dbvalues.pop(word,None)
-            self.counted_words.pop(word,None)
-
-        self.dbvalues = Counter(self.dbvalues)
-        return self.dbvalues
-
-    def sentimentvalue(self):
-        totalvalue = 0
-        frequency = sum(self.counted_words.values())
-        for key,value in self.counted_words.items():
-            totalvalue += value * self.dbvalues[key]
-
-        sv = totalvalue/ frequency
-        return round(sv,4)
 
 Base = declarative_base()
 class WordBank(Base):
@@ -131,62 +97,70 @@ class Database(object):
         Session = sessionmaker(bind=engine)
         self.session = Session()
 
-    def query(self,word):
-        row = self.session.query(WordBank).filter_by(word=word).first()
-        return row
-
-    def queryall(self,dictobj):
-        for word in dictobj:
+    def query(self,content):
+        found = {}
+        notfound = {}
+        for word in content:
             row = self.session.query(WordBank).filter_by(word=word).first()
+            try:
+                found.update({row.word:row.value})
+            except AttributeError:
+                notfound.update({word:None})
+            """
             if row:
-                yield {row.word:row.value}
+                found.update({row.word:row.value})
             elif not row:
-                yield {word:None}
+                notfound.update({word:None})
+            """
+
+        return found, notfound
+
+class Data(object):
+    def __init__(self):
+        self.content = None
+        self.wordcount = Counter()
+        self.wordsfound = Counter()
+        self.wordsnotfound = {}
+
+    def __call__(self):
+        return self.__dict__
 
 class TextSentiment(object):
     def __init__(self,file_path=None,chunk_size=3):
-        #Create content genenerator
         self.content = FileObj(file_path=file_path,
                                chunk_size=chunk_size).filter()
-        #Create database connection
         self.db = Database(db_path=DB_PATH)
-        #Create Data Object that holds working information
-        self.data = Data(content=self.content)
+        self.data = Data()
+        self.data.content = self.content
 
-    def countwords(self):
-        try:
-            self.data.countwords()
-        except Exception as e:
-            print("Error: ",e)
-        finally:
-            return self.data.counted_words
+    def wordcountcalc(self):
+        for chunk in self.content:
+            self.data.wordcount.update(Counter(chunk))
 
-    def query(self,word):
-        return self.db.query(word)
-
-    def queryall(self,dictobj):
-        return self.db.queryall(dictobj)
-
-    def updatedbvalues(self,values):
-        return self.data.updatedbvalues(values)
-
-    def rejectwords(self):
-        return self.data.rejectwords()
-
-    def cleanvalues(self):
-        return self.data.cleanvalues()
+    def query(self):
+        keys = self.data.wordcount.keys()
+        self.data.wordsfound, self.data.wordsnotfound = self.db.query(keys)
 
     def sentimentvalue(self):
-        return self.data.sentimentvalue()
+        totalvalue, totalfrequency = 0, 0
+        for key, value in self.data.wordsfound.items():
+            wordfrequency = self.data.wordcount[key]
+            totalfrequency += wordfrequency
+            totalvalue += wordfrequency * value
+        sv = totalvalue / totalfrequency
+        return round(sv,4)
+
+    def __getitem__(self,key):
+        return self.data.__dict__[key]
+
+    def __call__(self):
+        return self.data.__dict__
 
 def main():
     ts = TextSentiment(file_path=TEST_DOC,chunk_size=10)
-    data = ts.countwords()
-    dbvalues = ts.queryall(data)
-    ts.updatedbvalues(dbvalues)
-    ts.rejectwords()
-    ts.cleanvalues()
-    sv = ts.sentimentvalue()
+    ts.wordcountcalc() #Count each word
+    ts.query() #Split words into wordsfound and wordsnotfound
+    sv = ts.sentimentvalue() #Calculate the average sentiment value
     print("Sentiment Value: ",sv)
 
 if __name__ == '__main__':
