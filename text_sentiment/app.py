@@ -1,10 +1,11 @@
-
 from tests.fixtures.constants import *
 from sqlalchemy import Integer, Column, Numeric, String
 from sqlalchemy import create_engine, MetaData, Table
 from sqlalchemy.orm import mapper, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter
+import argparse
+import os
 
 class Filters(object):
     """Contain filters used to filter the contents from textfile"""
@@ -41,7 +42,7 @@ class Filters(object):
 
 class FileObj(object):
     """Read in textfile and create content generator"""
-    def __init__(self,file_path,chunk_size=1):
+    def __init__(self,file_path=None,chunk_size=1):
         self.file_path = file_path
         self.chunk_size = chunk_size
         self.pipeline = self.chunk(self.openfile())
@@ -91,6 +92,10 @@ class WordBank(Base):
 
 class Database(object):
     def __init__(self,db_path=None):
+        """Temp Fix regarding path constants"""
+        PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+        DEFINITIONS_ROOT = os.path.join(PROJECT_ROOT, 'models','wordbank.db')
+        db_path = DEFINITIONS_ROOT
         engine = create_engine('sqlite:///%s' % db_path, echo=False)
         metadata = MetaData(engine)
         Warriner_English = Table('Warriner-English', metadata, autoload=True)
@@ -106,13 +111,6 @@ class Database(object):
                 found.update({row.word:row.value})
             except AttributeError:
                 notfound.update({word:None})
-            """
-            if row:
-                found.update({row.word:row.value})
-            elif not row:
-                notfound.update({word:None})
-            """
-
         return found, notfound
 
 class Data(object):
@@ -126,7 +124,7 @@ class Data(object):
         return self.__dict__
 
 class TextSentiment(object):
-    def __init__(self,file_path=None,chunk_size=3):
+    def __init__(self,file_path,chunk_size):
         self.content = FileObj(file_path=file_path,
                                chunk_size=chunk_size).filter()
         self.db = Database(db_path=DB_PATH)
@@ -156,8 +154,20 @@ class TextSentiment(object):
     def __call__(self):
         return self.data.__dict__
 
+def myparser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--file_path','--file','-f', default=None, help='File path to file for analysis')
+    parser.add_argument('--chunk_size','--chunk','-ch', default=1, help='Lines to read at a time')
+    args = parser.parse_args()
+    if not args.file_path:
+        parser.error("A file path path is not specified. Use -h for help")
+    return(args)
+
 def main():
-    ts = TextSentiment(file_path=TEST_DOC,chunk_size=10)
+    args = myparser()
+    print(args)
+    if args.file_path:
+        ts = TextSentiment(args.file_path,args.chunk_size)
     ts.wordcountcalc() #Count each word
     ts.query() #Split words into wordsfound and wordsnotfound
     sv = ts.sentimentvalue() #Calculate the average sentiment value
