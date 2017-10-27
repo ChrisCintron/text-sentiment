@@ -31,4 +31,7 @@ setup(
     #download_url='https://example.com', #Tarball download
     author='Christopher Cintron',
     author_email='chris.cintron502@gmail.com'
+    entry_points={
+        'console_scripts': ['text-sentiment=text_sentiment.app:main'],
+    },
 )

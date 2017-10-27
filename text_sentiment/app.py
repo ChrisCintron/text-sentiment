@@ -1,4 +1,5 @@
-from tests.fixtures.constants import *
+#!/usr/bin/python3
+from constants import *
 from sqlalchemy import Integer, Column, Numeric, String
 from sqlalchemy import create_engine, MetaData, Table
 from sqlalchemy.orm import mapper, sessionmaker
@@ -94,7 +95,7 @@ class Database(object):
     def __init__(self,db_path=None):
         """Temp Fix regarding path constants"""
         PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
-        DEFINITIONS_ROOT = os.path.join(PROJECT_ROOT, 'models','wordbank.db')
+        DEFINITIONS_ROOT = os.path.join(PROJECT_ROOT,'wordbank.db')
         db_path = DEFINITIONS_ROOT
         engine = create_engine('sqlite:///%s' % db_path, echo=False)
         metadata = MetaData(engine)
@@ -165,7 +166,6 @@ def myparser():
 
 def main():
     args = myparser()
-    print(args)
     if args.file_path:
         ts = TextSentiment(args.file_path,args.chunk_size)
     ts.wordcountcalc() #Count each word
