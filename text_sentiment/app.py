@@ -120,6 +120,7 @@ class Data(object):
         self.wordcount = Counter()
         self.wordsfound = Counter()
         self.wordsnotfound = {}
+        self.totalwordvalues = Counter()
 
     def __call__(self):
         return self.__dict__
@@ -150,6 +151,11 @@ class TextSentiment(object):
         self.data.sentimentvalue = sv
         return sv
 
+    def mapvalues(self,frequencies,wordsfound):
+        totalwordvalues = {key:frequencies[key]*value for key,value in wordsfound.items()}
+        self.data.totalwordvalues.update(totalwordvalues)
+        return totalwordvalues
+
     def __getitem__(self,key):
         return self.data.__dict__[key]
 
@@ -160,7 +166,7 @@ def myparser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_path','--file','-f', default=None, help='File path to file for analysis')
     parser.add_argument('--chunk_size','--chunk','-ch', default=1, help='Lines to read at a time')
-    parser.add_argument('--verbose', '-v', action='store_true', default=False, help='Show all data')
+    parser.add_argument('--verbose', '-v', action='count', default=0, help='Show all data')
     args = parser.parse_args()
     if not args.file_path:
         parser.error("A file path path is not specified. Use -h for help")
@@ -168,21 +174,25 @@ def myparser():
 
 def main():
     args = myparser()
-    if args.file_path:
-        ts = TextSentiment(args.file_path,args.chunk_size)
+    ts = TextSentiment(args.file_path,args.chunk_size)
     ts.wordcountcalc()
     ts.query()
+    ts.mapvalues(ts.data.wordcount,ts.data.wordsfound)
     ts.sentimentvalue()
 
-    if not args.verbose:
+    if args.verbose >= 0:
         print("Sentiment Value: ",ts.data.sentimentvalue)
-    elif args.verbose:
+    if args.verbose >= 1:
         print("\n__Text Sentiment Data Collections__")
         print("-FinalValues-")
         print("Sentiment Value: ",ts.data.sentimentvalue)
+        print("Total number of words: ",sum(ts.data.wordcount.values()))
+        print("Number of unique Parsed Words: ",len(ts.data.wordcount))
+        print("Number of unique found words: ",len(ts.data.wordsfound))
+        print("Number of unique notfound words:",len(ts.data.wordsnotfound))
         print("Most Common Words: ",ts.data.wordcount.most_common(3))
-        wordsfound = ts.data.wordsfound
-        print("Highest Valued Word: ",max(wordsfound,key=wordsfound.get))
+        print("Highest Count*DBValue Words: ",ts.data.totalwordvalues.most_common(3))
+    if args.verbose >= 2:
         print("\nWordFrequency: ",ts.data.wordcount)
         print("\nFoundInDB: ",ts.data.wordsfound)
         print("\nnotFoundinDB: ",ts.data.wordsnotfound)
