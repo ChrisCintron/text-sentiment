@@ -146,8 +146,9 @@ class TextSentiment(object):
             wordfrequency = self.data.wordcount[key]
             totalfrequency += wordfrequency
             totalvalue += wordfrequency * value
-        sv = totalvalue / totalfrequency
-        return round(sv,4)
+        sv = round(totalvalue / totalfrequency,5)
+        self.data.sentimentvalue = sv
+        return sv
 
     def __getitem__(self,key):
         return self.data.__dict__[key]
@@ -159,6 +160,7 @@ def myparser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_path','--file','-f', default=None, help='File path to file for analysis')
     parser.add_argument('--chunk_size','--chunk','-ch', default=1, help='Lines to read at a time')
+    parser.add_argument('--verbose', '-v', action='store_true', default=False, help='Show all data')
     args = parser.parse_args()
     if not args.file_path:
         parser.error("A file path path is not specified. Use -h for help")
@@ -168,10 +170,22 @@ def main():
     args = myparser()
     if args.file_path:
         ts = TextSentiment(args.file_path,args.chunk_size)
-    ts.wordcountcalc() #Count each word
-    ts.query() #Split words into wordsfound and wordsnotfound
-    sv = ts.sentimentvalue() #Calculate the average sentiment value
-    print("Sentiment Value: ",sv)
+    ts.wordcountcalc()
+    ts.query()
+    ts.sentimentvalue()
+
+    if not args.verbose:
+        print("Sentiment Value: ",ts.data.sentimentvalue)
+    elif args.verbose:
+        print("\n__Text Sentiment Data Collections__")
+        print("-FinalValues-")
+        print("Sentiment Value: ",ts.data.sentimentvalue)
+        print("Most Common Words: ",ts.data.wordcount.most_common(3))
+        wordsfound = ts.data.wordsfound
+        print("Highest Valued Word: ",max(wordsfound,key=wordsfound.get))
+        print("\nWordFrequency: ",ts.data.wordcount)
+        print("\nFoundInDB: ",ts.data.wordsfound)
+        print("\nnotFoundinDB: ",ts.data.wordsnotfound)
 
 if __name__ == '__main__':
     main()
