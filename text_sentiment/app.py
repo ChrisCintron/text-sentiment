@@ -4,86 +4,62 @@ from sqlalchemy import Integer, Column, Numeric, String
 from sqlalchemy import create_engine, MetaData, Table
 from sqlalchemy.orm import mapper, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from collections import Counter
+from collections import Counter, defaultdict
 import argparse
 import os
 
 class Filters(object):
     """Contain filters used to filter the contents from textfile"""
     def __init__(self):
-        self.order = ['lowercase','split','badchars','whitespace']
+        self.order = ['remove_badchars','make_lowercase','split']
 
-    def filter(self,chunk):
-        """Filter chunk in specified order of filter layers"""
+    def filter(self,line):
+        """Filter line in specified order of filter layers"""
         for name in self.order:
             func = getattr(self,name)
-            chunk = func(chunk)
-        return chunk
+            line = func(line)
+        return line
 
-    def split(self,chunk):
-        """Parse chunk into list"""
-        return chunk.split(' ')
+    def split(self,line):
+        """Parse words in line into list
+        Notes:
+            Make sure this is the last filter in the order
+        """
+        return [word for word in line.split(' ') if word]
 
-    def badchars(self,chunk):
+    def remove_badchars(self,line):
         """Remove non-alphabetical characters"""
-        return [''.join(filter(str.isalpha,word)) for word in chunk]
+        return ''.join(filter(lambda char: char.isalpha() or char.isspace(), line))
 
-    def lowercase(self,chunk):
+    def make_lowercase(self,line):
         """Lowercase all characters"""
-        return chunk.lower()
-
-    def whitespace(self,chunk):
-        """Remove whitespace and blanks"""
-        space,nothing = ' ',''
-        while space in chunk:
-            chunk.remove(space)
-        while nothing in chunk:
-            chunk.remove(nothing)
-        return chunk
+        return line.lower()
 
 class FileObj(object):
     """Read in textfile and create content generator"""
-    def __init__(self,file_path=None,chunk_size=1):
+    def __init__(self,file_path=None,):
         self.file_path = file_path
-        self.chunk_size = chunk_size
-        self.pipeline = self.chunk(self.openfile())
         self.filters = Filters()
 
     def openfile(self,*kwargs):
         """Opens file and generates lines
-        Args:
-            file_path = Path to text file
         Notes:
             Accepts plain text files
         """
         with open(self.file_path, 'r') as infile:
             for line in infile:
-                line_generator = line.rstrip('\n')
-                yield line_generator
+                yield line.rstrip('\n')
 
-    def chunk(self,line_generator):
-        """Package lines in file into specific chunk size, return the chunk
-        Args:
-            line_gen = String Generator of lines of file
-            chunk_size = Number of lines from file wanted in each chunk
-        """
-        lines = []
-        try:
-            while True:
-                for i in range(0,self.chunk_size):
-                    lines.append(next(line_generator))
-                dirty_chunk = ' '.join(lines)
-                yield dirty_chunk
-                lines = []
-        except StopIteration as e:
-            if lines:
-                dirty_chunk = ' '.join(lines)
-                yield dirty_chunk
+    def filter(self,content):
+        """Filter content in textfile into shared data structure"""
+        for line in content:
+            filtered_line = self.filters.filter(line)
+            yield filtered_line
 
-    def filter(self):
-        """Filter content in textfile"""
-        for chunk in self.pipeline:
-            yield self.filters.filter(chunk)
+    def run(self):
+        content = self.filter(self.openfile())
+        return content
+
 
 Base = declarative_base()
 class WordBank(Base):
@@ -106,12 +82,13 @@ class Database(object):
     def query(self,content):
         found = {}
         notfound = {}
+        nan = float("NaN")
         for word in content:
             row = self.session.query(WordBank).filter_by(word=word).first()
             try:
                 found.update({row.word:row.value})
             except AttributeError:
-                notfound.update({word:None})
+                notfound.update({word:nan})
         return found, notfound
 
 class Data(object):
@@ -126,20 +103,35 @@ class Data(object):
         return self.__dict__
 
 class TextSentiment(object):
-    def __init__(self,file_path,chunk_size):
-        self.content = FileObj(file_path=file_path,
-                               chunk_size=chunk_size).filter()
+    def __init__(self,file_path):
+        self.shared_dict = {}
+        self.metrics = ['total_word_count','words']
+        self.content = FileObj(file_path=file_path).run()
         self.db = Database(db_path=DB_PATH)
         self.data = Data()
         self.data.content = self.content
 
-    def wordcountcalc(self):
-        for chunk in self.content:
-            self.data.wordcount.update(Counter(chunk))
+    def create_data_structure(self,metrics,shared_dict):
+        for item in metrics:
+            shared_dict[item] = {}
+        return shared_dict
 
-    def query(self):
-        keys = self.data.wordcount.keys()
-        self.data.wordsfound, self.data.wordsnotfound = self.db.query(keys)
+    def extractcontent(self,content,shared_dict):
+        wordcounts = Counter()
+        for line in content:
+            unique_line = set(line)
+            for item in unique_line:
+                wordcounts.update({item:line.count(item)})
+        for key,value in wordcounts.items():
+            shared_dict['words'][key] = {'frequency':value}
+        return shared_dict
+
+    def query(self,keys):
+        wordsfound, wordsnotfound = self.db.query(keys)
+        combined_dict = {}
+        combined_dict.update(wordsfound)
+        combined_dict.update(wordsnotfound)
+        return combined_dict
 
     def sentimentvalue(self):
         totalvalue, totalfrequency = 0, 0
@@ -151,10 +143,44 @@ class TextSentiment(object):
         self.data.sentimentvalue = sv
         return sv
 
-    def mapvalues(self,frequencies,wordsfound):
-        totalwordvalues = {key:frequencies[key]*value for key,value in wordsfound.items()}
-        self.data.totalwordvalues.update(totalwordvalues)
-        return totalwordvalues
+    def set_totalwordcount(self):
+            self.shared_dict['total_word_count'] = len(self.shared_dict['words'])
+
+    def set_totalvalue(self):
+        for key,value in self.shared_dict['words'].items():
+            frequency = self.shared_dict['words'][key]['frequency']
+            db_value = self.shared_dict['words'][key]['db_value']
+            self.shared_dict['words'][key].update({"totalvalue":frequency*db_value})
+
+    def set_highlowratings(self,metric):
+        highest_rating,lowest_rating = 0,10
+        for key,value in self.shared_dict['words'].items():
+            value = value[metric]
+            if value > highest_rating:
+                highest_word = {}
+                highest_rating = value
+                highest_word[key] = highest_rating
+            if value < lowest_rating:
+                lowest_word = {}
+                lowest_rating = value
+                lowest_word[key] = lowest_rating
+        results = {metric:{'highest_pair':highest_word, 'lowest_pair':lowest_word}}
+        self.shared_dict.update(results)
+        return results
+
+    def run(self):
+        self.create_data_structure(self.metrics,self.shared_dict)
+        self.extractcontent(self.content,self.shared_dict)
+        combined_dict = self.query(self.shared_dict['words'].keys())
+
+        for key,value in combined_dict.items():
+            self.shared_dict['words'][key].update({"db_value":value})
+
+        self.set_totalwordcount()
+        self.set_totalvalue()
+        self.set_highlowratings('db_value')
+        print(self.shared_dict)
+
 
     def __getitem__(self,key):
         return self.data.__dict__[key]
@@ -197,5 +223,19 @@ def main():
         print("\nFoundInDB: ",ts.data.wordsfound)
         print("\nnotFoundinDB: ",ts.data.wordsnotfound)
 
+def main_test():
+     ts = TextSentiment(TEST_DOC)
+     ts.run()
+     #print(ts.shared_dict)
+    # print(ts.shared_dict)
+
+
+
+
+
+
+
 if __name__ == '__main__':
-    main()
+    #main()
+    main_test()
+    pass
