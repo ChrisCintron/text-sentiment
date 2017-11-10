@@ -7,6 +7,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter, defaultdict
 import argparse
 import os
+import json
 
 class Filters(object):
     """Contain filters used to filter the contents from textfile"""
@@ -37,8 +38,9 @@ class Filters(object):
 
 class FileObj(object):
     """Read in textfile and create content generator"""
-    def __init__(self,file_path=None,):
+    def __init__(self,file_path=None,file_upload=None):
         self.file_path = file_path
+        self.file_upload = file_upload
         self.filters = Filters()
 
     def openfile(self,*kwargs):
@@ -57,7 +59,11 @@ class FileObj(object):
             yield filtered_line
 
     def run(self):
-        content = self.filter(self.openfile())
+        if self.file_path:
+            file = self.openfile()
+        elif self.file_upload:
+            file = self.file_upload
+        content = self.filter(file)
         return content
 
 
@@ -66,6 +72,7 @@ class WordBank(Base):
     __tablename__ = 'Warriner-English'
     word = Column(String, primary_key=True)
     value = Column(Integer)
+
 
 class Database(object):
     def __init__(self,db_path=None):
@@ -76,19 +83,20 @@ class Database(object):
         engine = create_engine('sqlite:///%s' % db_path, echo=False)
         metadata = MetaData(engine)
         Warriner_English = Table('Warriner-English', metadata, autoload=True)
+        #print(Warriner_English['word'])
+        #exit()
         Session = sessionmaker(bind=engine)
         self.session = Session()
 
     def query(self,content):
         found = {}
         notfound = {}
-        nan = float("NaN")
         for word in content:
             row = self.session.query(WordBank).filter_by(word=word).first()
             try:
                 found.update({row.word:row.value})
             except AttributeError:
-                notfound.update({word:nan})
+                notfound.update({word:0})
         return found, notfound
 
 class Data(object):
@@ -103,11 +111,15 @@ class Data(object):
         return self.__dict__
 
 class TextSentiment(object):
-    def __init__(self,file_path):
+    def __init__(self,file_path=None,file_upload=None,db_path=None):
         self.shared_dict = {}
-        self.metrics = ['total_word_count','words']
-        self.content = FileObj(file_path=file_path).run()
-        self.db = Database(db_path=DB_PATH)
+        self.metrics = ['metrics','words']
+        if file_path:
+            fileobj = FileObj(file_path=file_path)
+        elif file_upload:
+            fileobj = FileObj(file_upload=file_upload)
+        self.content = fileobj.run()
+        self.db = Database(db_path=db_path)
         self.data = Data()
         self.data.content = self.content
 
@@ -133,54 +145,103 @@ class TextSentiment(object):
         combined_dict.update(wordsnotfound)
         return combined_dict
 
-    def sentimentvalue(self):
-        totalvalue, totalfrequency = 0, 0
-        for key, value in self.data.wordsfound.items():
-            wordfrequency = self.data.wordcount[key]
-            totalfrequency += wordfrequency
-            totalvalue += wordfrequency * value
-        sv = round(totalvalue / totalfrequency,5)
-        self.data.sentimentvalue = sv
-        return sv
+    def set_wordcount(self):
+        results = 0
+        for value in self.shared_dict['words'].values():
+            results += value['frequency']
+        self.shared_dict['metrics']['wordcount'] = results
+        return results
 
-    def set_totalwordcount(self):
-            self.shared_dict['total_word_count'] = len(self.shared_dict['words'])
+    def set_uniquewordcount(self):
+        results = len(self.shared_dict['words'])
+        self.shared_dict['metrics']['uniquewordcount'] = results
+        return results
 
-    def set_totalvalue(self):
-        for key,value in self.shared_dict['words'].items():
-            frequency = self.shared_dict['words'][key]['frequency']
-            db_value = self.shared_dict['words'][key]['db_value']
-            self.shared_dict['words'][key].update({"totalvalue":frequency*db_value})
+    def set_acceptedwordcount(self):
+        results = 0
+        for value in self.shared_dict['words'].values():
+            if value['db_value']:
+                results += value['frequency']
+        self.shared_dict['metrics']['acceptedwordcount'] = results
+        return results
+
+    def set_accepteduniquewordcount(self):
+        results = 0
+        for value in self.shared_dict['words'].values():
+            if value['db_value']:
+                results += 1
+        self.shared_dict['metrics']['accepteduniquewordcount'] = results
+        return results
+
+    def set_rejecteduniquewordcount(self):
+        results = 0
+        for value in self.shared_dict['words'].values():
+            if not value['db_value']:
+                results += 1
+        self.shared_dict['metrics']['rejecteduniquewordcount'] = results
+        return results
+
+    def set_rejectedwordcount(self):
+        results = 0
+        for value in self.shared_dict['words'].values():
+            if not value['db_value']:
+                results += value['frequency']
+        self.shared_dict['metrics']['rejectedwordcount'] = results
+        return results
 
     def set_highlowratings(self,metric):
         highest_rating,lowest_rating = 0,10
         for key,value in self.shared_dict['words'].items():
             value = value[metric]
-            if value > highest_rating:
-                highest_word = {}
-                highest_rating = value
-                highest_word[key] = highest_rating
-            if value < lowest_rating:
-                lowest_word = {}
-                lowest_rating = value
-                lowest_word[key] = lowest_rating
-        results = {metric:{'highest_pair':highest_word, 'lowest_pair':lowest_word}}
-        self.shared_dict.update(results)
+            if value:
+                if value > highest_rating:
+                    highest_word = key
+                    highest_rating = value
+                if value < lowest_rating:
+                    lowest_word = key
+                    lowest_rating = value
+
+        self.shared_dict['metrics']['highest_pair'] = (highest_word,highest_rating)
+        self.shared_dict['metrics']['lowest_pair'] = (lowest_word,lowest_rating)
+
+    def set_word_totalvalue(self):
+        for key,value in self.shared_dict['words'].items():
+            frequency = self.shared_dict['words'][key]['frequency']
+            db_value = self.shared_dict['words'][key]['db_value']
+            results = {"totalvalue":frequency*db_value}
+            self.shared_dict['words'][key].update(results)
         return results
+
+    def set_word_dbvalue(self):
+        combined_dict = self.query(self.shared_dict['words'].keys())
+        for key,value in combined_dict.items():
+            self.shared_dict['words'][key].update({"db_value":value})
+
+    def set_sentimentvalue(self):
+        totalvalue = 0
+        totalfrequency = self.shared_dict['metrics']['acceptedwordcount']
+        for value in self.shared_dict['words'].values():
+            totalvalue += value['totalvalue']
+        sv = round(totalvalue / totalfrequency,5)
+        self.shared_dict['metrics'].update({'sentimentvalue':sv})
+        return sv
 
     def run(self):
         self.create_data_structure(self.metrics,self.shared_dict)
         self.extractcontent(self.content,self.shared_dict)
-        combined_dict = self.query(self.shared_dict['words'].keys())
+        self.set_word_dbvalue()
+        self.set_word_totalvalue()
 
-        for key,value in combined_dict.items():
-            self.shared_dict['words'][key].update({"db_value":value})
-
-        self.set_totalwordcount()
-        self.set_totalvalue()
+        self.set_wordcount()
+        self.set_uniquewordcount()
+        self.set_acceptedwordcount()
+        self.set_accepteduniquewordcount()
+        self.set_rejectedwordcount()
+        self.set_rejecteduniquewordcount()
         self.set_highlowratings('db_value')
-        print(self.shared_dict)
-
+        self.set_sentimentvalue()
+        print(json.dumps(self.shared_dict, indent=4))
+        return json.dumps(self.shared_dict)
 
     def __getitem__(self,key):
         return self.data.__dict__[key]
@@ -224,18 +285,10 @@ def main():
         print("\nnotFoundinDB: ",ts.data.wordsnotfound)
 
 def main_test():
-     ts = TextSentiment(TEST_DOC)
-     ts.run()
-     #print(ts.shared_dict)
-    # print(ts.shared_dict)
-
-
-
-
-
+    ts = TextSentiment(TEST_DOC,DB_PATH)
+    ts.run()
 
 
 if __name__ == '__main__':
     #main()
     main_test()
-    pass
