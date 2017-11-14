@@ -1,8 +1,7 @@
-#!/usr/bin/python3
-from constants import *
+from fixtures.constants import *
 from sqlalchemy import Integer, Column, Numeric, String
 from sqlalchemy import create_engine, MetaData, Table
-from sqlalchemy.orm import mapper, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from collections import Counter, defaultdict
 import argparse
@@ -21,13 +20,6 @@ class Filters(object):
             line = func(line)
         return line
 
-    def split(self,line):
-        """Parse words in line into list
-        Notes:
-            Make sure this is the last filter in the order
-        """
-        return [word for word in line.split(' ') if word]
-
     def remove_badchars(self,line):
         """Remove non-alphabetical characters"""
         return ''.join(filter(lambda char: char.isalpha() or char.isspace(), line))
@@ -36,127 +28,108 @@ class Filters(object):
         """Lowercase all characters"""
         return line.lower()
 
-class FileObj(object):
-    """Read in textfile and create content generator"""
-    def __init__(self,file_path=None,file_upload=None):
-        self.file_path = file_path
-        self.file_upload = file_upload
+    def split(self,line):
+        """Parse words in line into list
+        Notes:
+            Make sure this is the last filter in the order
+        """
+        return [word for word in line.split(' ') if word]
+
+class Database(object):
+    def __init__(self,db_path=None):
+        """Create Database to perform queries"""
+        engine = create_engine('sqlite:///%s' % db_path, echo=False)
+        self.metadata = MetaData()
+        self.metadata.reflect(bind=engine)
+        Session = sessionmaker(bind=engine)
+        self.session = Session()
+
+    def query(self, table=None, word=None):
+        """Query individual word for value in specified table"""
+        table = self.metadata.tables[table]
+        row = self.session.query(table).filter_by(word=word).first()
+        try:
+            return {word:row.value}
+        except AttributeError:
+            return {word:0}
+
+class NumberCruncher:
+    """Helper that contains analysis tools"""
+    def wordcount(content):
+        """Counts words in list or generator"""
+        totalcount = Counter()
+        if isinstance(content,list): #Catches one liners to work with loop
+            content = [content]
+        for line in content:
+            count = Counter(line)
+            totalcount.update(count)
+        return totalcount
+
+class TextSentiment(object):
+    def __init__(self,file_path=None,content=None,db_path=None):
+        self.data = defaultdict(dict) #Data container for export
+        self.metrics = {}
+        self.metrics['totaluniquewordcount'] = 0
+
+        self.content = content
+        self.db_path = db_path
+
+        self.db = Database(db_path=db_path) #Compose database connection
         self.filters = Filters()
 
-    def openfile(self,*kwargs):
-        """Opens file and generates lines
-        Notes:
-            Accepts plain text files
-        """
-        with open(self.file_path, 'r') as infile:
+        if file_path:
+            self.content = self._openfile(file_path)
+
+        self.filtered_content = self._filter(self.content)
+
+    def _openfile(self,file_path):
+        """Open plain text file and generate lines"""
+        with open(file_path, 'r') as infile:
             for line in infile:
                 yield line.rstrip('\n')
 
-    def filter(self,content):
+    def _filter(self,content):
         """Filter content in textfile into shared data structure"""
         for line in content:
             filtered_line = self.filters.filter(line)
             yield filtered_line
 
+    def _createlabels(self,labels,value=None):
+        """Populate metric container with labels"""
+        for label in labels:
+            self.metrics[label] = value
+
+    def query(self,table=None,word=None):
+        """Search db table for word"""
+        return self.db.query(table=table,word=word)
+
+    def _updateWord(self,word,count):
+        """Updates that occur on every word iteration"""
+        self.data[word] = {}
+        self.data[word].update(frequency=count,tables={})
+        self.metrics['totaluniquewordcount'] += 1
+
+    def _updateTable(self,word,count,table):
+        """Updates that occur on every table iteration"""
+        query = self.query(table=table,word=word)
+        self.data[word]['tables'].update({table: {}})
+        self.data[word]['tables'][table].update({'value': query[word]})
+        self.data[word]['tables'][table].update({'total_value': count*query[word]})
+
     def run(self):
-        if self.file_path:
-            file = self.openfile()
-        elif self.file_upload:
-            file = self.file_upload
-        content = self.filter(file)
-        return content
-
-
-Base = declarative_base()
-class WordBank(Base):
-    __tablename__ = 'Warriner-English'
-    word = Column(String, primary_key=True)
-    value = Column(Integer)
-
-
-class Database(object):
-    def __init__(self,db_path=None):
-        """Temp Fix regarding path constants"""
-        PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
-        DEFINITIONS_ROOT = os.path.join(PROJECT_ROOT,'wordbank.db')
-        db_path = DEFINITIONS_ROOT
-        engine = create_engine('sqlite:///%s' % db_path, echo=False)
-        metadata = MetaData(engine)
-        Warriner_English = Table('Warriner-English', metadata, autoload=True)
-        #print(Warriner_English['word'])
-        #exit()
-        Session = sessionmaker(bind=engine)
-        self.session = Session()
-
-    def query(self,content):
-        found = {}
-        notfound = {}
-        for word in content:
-            row = self.session.query(WordBank).filter_by(word=word).first()
-            try:
-                found.update({row.word:row.value})
-            except AttributeError:
-                notfound.update({word:0})
-        return found, notfound
-
-class Data(object):
-    def __init__(self):
-        self.content = None
-        self.wordcount = Counter()
-        self.wordsfound = Counter()
-        self.wordsnotfound = {}
-        self.totalwordvalues = Counter()
-
-    def __call__(self):
-        return self.__dict__
-
-class TextSentiment(object):
-    def __init__(self,file_path=None,file_upload=None,db_path=None):
-        self.shared_dict = {}
-        self.metrics = ['metrics','words']
-        if file_path:
-            fileobj = FileObj(file_path=file_path)
-        elif file_upload:
-            fileobj = FileObj(file_upload=file_upload)
-        self.content = fileobj.run()
-        self.db = Database(db_path=db_path)
-        self.data = Data()
-        self.data.content = self.content
-
-    def create_data_structure(self,metrics,shared_dict):
-        for item in metrics:
-            shared_dict[item] = {}
-        return shared_dict
-
-    def extractcontent(self,content,shared_dict):
-        wordcounts = Counter()
-        for line in content:
-            unique_line = set(line)
-            for item in unique_line:
-                wordcounts.update({item:line.count(item)})
-        for key,value in wordcounts.items():
-            shared_dict['words'][key] = {'frequency':value}
-        return shared_dict
-
-    def query(self,keys):
-        wordsfound, wordsnotfound = self.db.query(keys)
-        combined_dict = {}
-        combined_dict.update(wordsfound)
-        combined_dict.update(wordsnotfound)
-        return combined_dict
-
-    def set_wordcount(self):
-        results = 0
-        for value in self.shared_dict['words'].values():
-            results += value['frequency']
-        self.shared_dict['metrics']['wordcount'] = results
-        return results
-
+        tables = [table for table in self.db.metadata.tables]
+        wordcount = NumberCruncher.wordcount(self.filtered_content)
+        for word,count in wordcount.items():
+            self._updateWord(word,count)
+            for table in tables:
+                self._updateTable(word,count,table)
+    """
     def set_uniquewordcount(self):
         results = len(self.shared_dict['words'])
         self.shared_dict['metrics']['uniquewordcount'] = results
         return results
-
+    """
+    """
     def set_acceptedwordcount(self):
         results = 0
         for value in self.shared_dict['words'].values():
@@ -225,7 +198,8 @@ class TextSentiment(object):
         sv = round(totalvalue / totalfrequency,5)
         self.shared_dict['metrics'].update({'sentimentvalue':sv})
         return sv
-
+    """
+    """
     def run(self):
         self.create_data_structure(self.metrics,self.shared_dict)
         self.extractcontent(self.content,self.shared_dict)
@@ -242,6 +216,7 @@ class TextSentiment(object):
         self.set_sentimentvalue()
         print(json.dumps(self.shared_dict, indent=4))
         return json.dumps(self.shared_dict)
+
 
     def __getitem__(self,key):
         return self.data.__dict__[key]
@@ -287,8 +262,11 @@ def main():
 def main_test():
     ts = TextSentiment(TEST_DOC,DB_PATH)
     ts.run()
+    """
 
+def main():
+    pass
 
 if __name__ == '__main__':
-    #main()
-    main_test()
+    #Run pytest for now.
+    main()
