@@ -8,6 +8,14 @@ import argparse
 import os
 import json
 
+"""
+TODO
+1.Finish pipeline calculations
+    -find totalfoundwords for each dictionary and add to metrics dict.
+    -find totalwordvalue for each dictionary and add to metrics dict.
+    -calculate sentiment value after finding ^these variables
+"""
+
 class Filters(object):
     """Contain filters used to filter the contents from textfile"""
     def __init__(self):
@@ -49,9 +57,9 @@ class Database(object):
         table_schema = self.metadata.tables[table]
         row = self.session.query(table_schema).filter_by(word=word).first()
         try:
-            return (table,word,row.value)
+            return table,word,row.value
         except AttributeError:
-            return (table,word,0)
+            return table,word,0
 
 class TextSentiment(object):
     def __init__(self,file_path=None,content=None,db_path=None):
@@ -62,16 +70,16 @@ class TextSentiment(object):
         self.filters = Filters()
         self.db = Database(db_path=db_path) #Compose database connection
 
-        self.data = {} #Data container for export
-        #self.metrics = {}
-        #self.tables = self.db.metadata.tables
-        #self.metrics['totalwords'] = 0
-        #self.metrics['sentimentvalue'] = 0
-        #self.metrics['foundwords'] = 0
+        #Data container for export
+        self.data = {}
+        self.data.update(words={})
+        self.tables = self.db.metadata.tables
 
         if file_path:
             self.content = self._openfile(file_path)
         self.content = self._filter(self.content)
+        #self.unique_content = self.wordcount(self.content)
+        #self._process(wordset=self.unique_content,tables=self.tables,format='json')
 
     def _openfile(self,file_path):
         """Open plain text file and generate lines"""
@@ -97,20 +105,46 @@ class TextSentiment(object):
             totalcount.update(count)
         return totalcount
 
-    
+    def _pipe(self,method):
+        """Store methods to be used in final calculation"""
+        if not hasattr(self,'pipeline'):
+            self.pipeline = []
+        self.pipeline.append(getattr(self,method))
+        return self.pipeline
 
-    def run(self):
-        pass
-        #self.wordcounts = self.wo
-        #for word in
+    def _package(self, word=None,frequency=None,table_data=None):
+        """Package word data for use in data container
 
+        Example:
+            returns item
+                item = {
+                          "words": {
+                            "_word_": {
+                              "frequency": {},
+                              "tables": {},
+                            }
+                          }
+                        }
+        """
+        item = dict()
+        item.update({word:{'frequency':frequency,'tables':{}}})
+        for table,word,value in table_data:
+            item[word]['tables'].update({table:value})
+        return item
 
+    def _process(self, wordset=None,tables=None,format=None):
+        """Create package to be used in data container"""
+        packages = dict()
+        for word,frequency in wordset.items():
+            table_data = tuple(map(self._query,tables,[word]*len(tables)))
+            package = self._package(word=word,frequency=frequency,table_data=table_data)
+            packages.update(package)
 
+        if format == 'json':
+            return json.dumps(packages,indent=4,sort_keys=True)
+        return packages
 
-        #print(json.dumps(self.shared_dict, indent=4))
-        #return json.dumps(self.shared_dict)
-
-
+"""INCOMPLETE
 def myparser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_path','--file','-f', default=None, help='File path to file for analysis')
@@ -145,7 +179,7 @@ def main():
         print("\nWordFrequency: ",ts.data.wordcount)
         print("\nFoundInDB: ",ts.data.wordsfound)
         print("\nnotFoundinDB: ",ts.data.wordsnotfound)
-
+"""
 if __name__ == '__main__':
     #Run pytest for now.
-    main()
+    pass
