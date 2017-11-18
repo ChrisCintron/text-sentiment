@@ -2,6 +2,7 @@ import pytest
 import types
 from context import app #context file adjust our working directory in order to access app
 from app import *
+from fixtures.constants import *
 
 class Test_Filters:
     @pytest.fixture(autouse=True)
@@ -38,31 +39,31 @@ class Test_Filters:
         assert output == expected_output
 
 @pytest.fixture()
-def db():
+def database():
     yield Database(db_path=DB_PATH)
 
 class Test_Database:
-    def test_init(self,db):
+    def test_init(self,database):
         expected_output = ['Warriner-English','labMTwords-English']
-        output = [table for table in db.metadata.tables]
+        output = [table for table in database.metadata.tables]
         assert set(expected_output).issubset(output)
 
-    def test_query(self,db):
+    def test_query(self,database):
         table = 'Warriner-English'
-        assert db.query(table=table, word='love') == (table, 'love', 8)
-        assert db.query(table=table, word='rest') == (table, 'rest', 7.86)
-        assert db.query(table=table, word='grave') == (table, 'grave', 2.4)
-        assert db.query(table=table, word='132s') == (table, '132s', 0)
-        assert db.query(table=table, word='x2') == (table, 'x2', 0)
-        assert db.query(table=table, word='yelack') == (table, 'yelack', 0)
+        assert database.query(table=table, word='love') == (table, 'love', 8)
+        assert database.query(table=table, word='rest') == (table, 'rest', 7.86)
+        assert database.query(table=table, word='grave') == (table, 'grave', 2.4)
+        assert database.query(table=table, word='132s') == (table, '132s', 0)
+        assert database.query(table=table, word='x2') == (table, 'x2', 0)
+        assert database.query(table=table, word='yelack') == (table, 'yelack', 0)
 
         table = 'labMTwords-English'
-        assert db.query(table=table, word='love') == (table, 'love', 8.42)
-        assert db.query(table=table, word='rest') == (table, 'rest', 7.18)
-        assert db.query(table=table, word='grave') == (table, 'grave', 2.56)
-        assert db.query(table=table, word='132s') == (table, '132s', 0)
-        assert db.query(table=table, word='x2') == (table, 'x2', 0)
-        assert db.query(table=table, word='yelack') == (table, 'yelack', 0)
+        assert database.query(table=table, word='love') == (table, 'love', 8.42)
+        assert database.query(table=table, word='rest') == (table, 'rest', 7.18)
+        assert database.query(table=table, word='grave') == (table, 'grave', 2.56)
+        assert database.query(table=table, word='132s') == (table, '132s', 0)
+        assert database.query(table=table, word='x2') == (table, 'x2', 0)
+        assert database.query(table=table, word='yelack') == (table, 'yelack', 0)
 
 
 @pytest.fixture()
@@ -120,7 +121,7 @@ class Test_TextSentiment:
     def test_process(self,ts):
         tables = ts.tables
         wordset = Counter(['one','two','two','three','three','three'])
-        #output = ts.process(wordset=wordset, tables=tables,format='json')
+        #output = ts.process(wordset=wordset, tables=tables,formatter='json')
         output = ts.process(wordset=wordset, tables=tables)
         #output = json.loads(output)
         assert output['table_metrics']['Warriner-English']['sentimentvalue'] == 5.83
@@ -139,15 +140,15 @@ class Test_TextSentiment:
         assert output['words']['three']['table_value']['Warriner-English'] == 5.43
         assert output['words']['three']['table_value']['labMTwords-English'] == 5.72
 
-    def test_updateTotalValues(self,ts):
+    def test_updatetotalvalues(self,ts):
         table = 'Warriner-English'
         frequency,table_value = 1, 6.04
-        output = ts._updateTotalValues(frequency,table,table_value)
+        output = ts._updatetotalvalues(frequency,table,table_value)
         expected_output = 6.04
         assert output == expected_output
 
         frequency,table_value = 2, 3
-        output = ts._updateTotalValues(frequency,table,table_value)
+        output = ts._updatetotalvalues(frequency,table,table_value)
         expected_output = 4.01
         assert output == expected_output
 
@@ -155,5 +156,5 @@ class Test_TextSentiment:
         """Test overall functionality"""
         string = "What can you tell me about the brother that went missing last night? I always wondered what hapens to folks that can't swim underwater! #Bananaface"
         ts = TextSentiment(file_path=TEST_DOC)
-        data = ts.process(format='json')
+        data = ts.process(formatter='json')
         print(data)
