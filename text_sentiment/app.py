@@ -8,14 +8,6 @@ import argparse
 import os
 import json
 
-"""
-TODO
-1.Finish pipeline calculations
-    -find totalfoundwords for each dictionary and add to metrics dict.
-    -find totalwordvalue for each dictionary and add to metrics dict.
-    -calculate sentiment value after finding ^these variables
-"""
-
 class Filters(object):
     """Contain filters used to filter the contents from textfile"""
     def __init__(self):
@@ -57,12 +49,25 @@ class Database(object):
         table_schema = self.metadata.tables[table]
         row = self.session.query(table_schema).filter_by(word=word).first()
         try:
-            return table,word,row.value
+            return (table,word,row.value)
         except AttributeError:
-            return table,word,0
+            return (table,word,0)
 
 class TextSentiment(object):
-    def __init__(self,file_path=None,content=None,db_path=None):
+    """Analyzes the sentiment score of a given file or text
+
+    Basic usage:
+        As a Module:
+            from text_sentiment.app import TextSentiment
+            ts = TextSentiment(file_path="absolute/path/to/file")
+            data = ts.process()
+
+        From the command line:
+            python3 text_sentiment/app.py -f absolute/path/to/file
+            or
+            python3 text_sentiment/app.py -c "My string I want analyzed"
+    """
+    def __init__(self,file_path=None,content=None,db_path=DB_PATH):
         self.file_path = file_path
         self.content = [content]
         self.db_path = db_path
@@ -70,16 +75,10 @@ class TextSentiment(object):
         self.filters = Filters()
         self.db = Database(db_path=db_path) #Compose database connection
 
-        #Data container for export
-        self.data = {}
-        self.data.update(words={})
-        self.tables = self.db.metadata.tables
-
         if file_path:
             self.content = self._openfile(file_path)
-        self.content = self._filter(self.content)
-        #self.unique_content = self.wordcount(self.content)
-        #self._process(wordset=self.unique_content,tables=self.tables,format='json')
+        self.content = self._wordcount(self._filter(self.content))
+        self.populate_datalabels()
 
     def _openfile(self,file_path):
         """Open plain text file and generate lines"""
@@ -97,7 +96,18 @@ class TextSentiment(object):
         """Search db table for word"""
         return self.db.query(table=table,word=word)
 
-    def wordcount(self, content):
+    def populate_datalabels(self):
+        """Initial function to add labels to the main data container"""
+        self.data = {}
+        self.data.update(table_metrics={})
+        self.data.update(words={})
+        self.tables = self.db.metadata.tables
+        for table in self.tables:
+            self.data['table_metrics'].update({table:{}})
+            self.data['table_metrics'][table].update(total_frequency=0,
+                                                     total_db_value=0,
+                                                     sentimentvalue=0)
+    def _wordcount(self, content):
         """Counts words in iterable"""
         totalcount = Counter()
         for line in content:
@@ -105,81 +115,78 @@ class TextSentiment(object):
             totalcount.update(count)
         return totalcount
 
-    def _pipe(self,method):
-        """Store methods to be used in final calculation"""
-        if not hasattr(self,'pipeline'):
-            self.pipeline = []
-        self.pipeline.append(getattr(self,method))
-        return self.pipeline
+    def _updateTotalValues(self,frequency,table,value):
+        """Update values needed to calculate sentiment value for each table"""
+        table_data = self.data['table_metrics'][table]
+        if value:
+            table_data['total_db_value'] += value * frequency
+            table_data['total_frequency'] += frequency
+            tdbval,tfreq = table_data['total_db_value'], table_data['total_frequency']
+            table_data['sentimentvalue'] =  round((tdbval / tfreq),2)
+            return table_data['sentimentvalue']
 
-    def _package(self, word=None,frequency=None,table_data=None):
-        """Package word data for use in data container
+    def process(self, wordset=None,tables=None,format=None):
+        """Process words in wordset and update the main data container with data"""
+        if not wordset:
+            wordset = self.content
+        if not tables:
+            tables = self.tables
 
-        Example:
-            returns item
-                item = {
-                          "words": {
-                            "_word_": {
-                              "frequency": {},
-                              "tables": {},
-                            }
-                          }
-                        }
-        """
-        item = dict()
-        item.update({word:{'frequency':frequency,'tables':{}}})
-        for table,word,value in table_data:
-            item[word]['tables'].update({table:value})
-        return item
-
-    def _process(self, wordset=None,tables=None,format=None):
-        """Create package to be used in data container"""
-        packages = dict()
         for word,frequency in wordset.items():
-            table_data = tuple(map(self._query,tables,[word]*len(tables)))
-            package = self._package(word=word,frequency=frequency,table_data=table_data)
-            packages.update(package)
+            word_labels = {word:{'frequency':frequency,'table_value':{}}}
+            self.data['words'].update(word_labels)
+
+            for table in tables:
+                table,row,value = self._query(table=table,word=word)
+                self.data['words'][word]['table_value'].update({table:value})
+                self._updateTotalValues(frequency,table,value)
 
         if format == 'json':
-            return json.dumps(packages,indent=4,sort_keys=True)
-        return packages
+            return json.dumps(self.data,indent=4,sort_keys=True)
+        return self.data
 
-"""INCOMPLETE
-def myparser():
+
+def parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file_path','--file','-f', default=None, help='File path to file for analysis')
-    parser.add_argument('--chunk_size','--chunk','-ch', default=1, help='Lines to read at a time')
+    parser.add_argument('--file_path','--file','-f', default=None, help='File (absolute)path to file for analysis')
+    parser.add_argument('--content', '-c', default=None, help='Use with raw strings')
+    parser.add_argument('--database', '-db', default=DB_PATH, help='Database (absolute)path to sqlite database.')
+    parser.add_argument('--json', action='store_true', default=False, help='Show data with JSON formatting')
     parser.add_argument('--verbose', '-v', action='count', default=0, help='Show all data')
     args = parser.parse_args()
-    if not args.file_path:
-        parser.error("A file path path is not specified. Use -h for help")
+    if not args.file_path and not args.content:
+        parser.error("A file path or content is not specified. Use -h for help")
     return(args)
 
 def main():
-    args = myparser()
-    ts = TextSentiment(args.file_path,args.chunk_size)
-    ts.wordcountcalc()
-    ts.query()
-    ts.mapvalues(ts.data.wordcount,ts.data.wordsfound)
-    ts.sentimentvalue()
+    args = parser()
+    ts = TextSentiment(file_path=args.file_path,content=args.content,db_path=args.database)
 
-    if args.verbose >= 0:
-        print("Sentiment Value: ",ts.data.sentimentvalue)
-    if args.verbose >= 1:
-        print("\n__Text Sentiment Data Collections__")
-        print("-FinalValues-")
-        print("Sentiment Value: ",ts.data.sentimentvalue)
-        print("Total number of words: ",sum(ts.data.wordcount.values()))
-        print("Number of unique Parsed Words: ",len(ts.data.wordcount))
-        print("Number of unique found words: ",len(ts.data.wordsfound))
-        print("Number of unique notfound words:",len(ts.data.wordsnotfound))
-        print("Most Common Words: ",ts.data.wordcount.most_common(3))
-        print("Highest Count*DBValue Words: ",ts.data.totalwordvalues.most_common(3))
+    if args.json:
+        data = ts.process(format='json')
+        print(data)
+        return data
+    else:
+        data = ts.process()
+
+    if args.verbose <= 0:
+        print("\nSentiment_Value: ")
+        for table in ts.tables:
+            print(table,": ",data['table_metrics'][table]['sentimentvalue'])
+        print()
+        return None
+    if args.verbose == 1:
+        print("\n___Table_Metrics___")
+        for table in ts.tables:
+            print('Table:',table)
+            print("sentimentvalue: ",data['table_metrics'][table]['sentimentvalue'])
+            print('total_frequency: ',data['table_metrics'][table]['total_frequency'])
+            print('total_db_value: ',data['table_metrics'][table]['total_db_value'],'\n')
+        return None
     if args.verbose >= 2:
-        print("\nWordFrequency: ",ts.data.wordcount)
-        print("\nFoundInDB: ",ts.data.wordsfound)
-        print("\nnotFoundinDB: ",ts.data.wordsnotfound)
-"""
+        print("\nALL DATA")
+        print(data)
+    return data
+
 if __name__ == '__main__':
-    #Run pytest for now.
-    pass
+    main()
